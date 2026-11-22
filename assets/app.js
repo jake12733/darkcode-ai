@@ -69,8 +69,9 @@ function saveHealth() {
   LS.set('health', o);
 }
 function saveProviders() {
-  const o = {}; for (const p of Object.values(prov)) o[p.id] = { key: p.key, account: p.account, model: p.model, fastModel: p.fastModel, base: p.base, weight: p.weight, enabled: p.enabled };
-  LS.set('prov', o);
+  const o = {}; for (const p of Object.values(prov)) o[p.id] = { account: p.account, model: p.model, fastModel: p.fastModel, base: p.base, weight: p.weight, enabled: p.enabled };
+  LS.set('prov', o); // no secrets in localStorage
+  loadCloud().then((c) => Promise.all(Object.values(prov).map((p) => c.vault.put('prov:' + p.id, p.key)))).catch((e) => console.warn('vault save', e));
 }
 loadProviders();
 
@@ -1067,7 +1068,7 @@ function renderSettings() {
     <div class="prow" data-id="${p.id}">
       <input type="checkbox" data-f="enabled" ${p.enabled ? 'checked' : ''} title="사용">
       <div class="nm">${esc(p.name)}<small>${esc(p.note || '')}</small></div>
-      ${p.builtin ? '<input type="text" value="내장 · 키 불필요" disabled>' : `<input type="password" data-f="key" value="${esc(p.key)}" placeholder="${p.local ? '(키 불필요)' : 'API 키'}" autocomplete="off" ${p.local ? 'disabled' : ''}>`}
+      ${p.builtin ? '<input type="text" value="내장 · 키 불필요" disabled>' : `<input type="password" data-f="key" value="" placeholder="${p.local ? '(키 불필요)' : p.key ? '저장됨 · …' + esc(p.key.slice(-4)) + ' (비워두면 유지)' : 'API 키'}" autocomplete="off" ${p.local ? 'disabled' : ''}>`}
       <input type="text" data-f="model" value="${esc(p.model)}" placeholder="모델" spellcheck="false">
       <input type="number" data-f="weight" value="${p.weight}" min="0" max="10" step="1" title="WRR 가중치" ${p.primary || p.local ? 'disabled' : ''}>
       ${p.kind === 'openai' || p.local ? `<div class="extra"><input type="text" data-f="base" value="${esc(p.base)}" placeholder="Base URL (프록시 가능)" spellcheck="false">${p.id === 'cloudflare' ? `<input type="text" data-f="account" value="${esc(p.account)}" placeholder="Account ID">` : p.local ? `<input type="text" data-f="fastModel" value="${esc(p.fastModel)}" placeholder="경량 모델 (라우팅/요약)">` : '<span></span>'}</div>` : ''}
@@ -1103,7 +1104,7 @@ function collectSettings() {
       const f = inp.dataset.f; if (inp.disabled) return;
       if (f === 'enabled') p.enabled = inp.checked;
       else if (f === 'weight') p.weight = Math.max(0, Math.min(10, Number(inp.value) || 0));
-      else { const v = inp.value.trim(); const before = p[f]; p[f] = v || (f === 'model' || f === 'base' || f === 'fastModel' ? PROVIDER_DEFS.find((d) => d.id === p.id)[f] || '' : ''); if (f === 'key' && before !== p[f]) { p.health = 1; p.cooldownUntil = 0; p.lastErr = ''; } }
+      else { const v = inp.value.trim(); if (f === 'key' && !v) return; const before = p[f]; p[f] = v || (f === 'model' || f === 'base' || f === 'fastModel' ? PROVIDER_DEFS.find((d) => d.id === p.id)[f] || '' : ''); if (f === 'key' && before !== p[f]) { p.health = 1; p.cooldownUntil = 0; p.lastErr = ''; } }
     });
   });
   opts.gateA = $('#optGateA').checked; opts.gateC = $('#optGateC').checked;
@@ -1117,49 +1118,297 @@ function collectSettings() {
   renderPool(); renderRouteSel(); renderStatus();
 }
 
-/* ================= AUTH (local operator accounts) ================= */
-async function sha256(s) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
-function getSession() { try { return JSON.parse(localStorage.getItem(NS + 'session') || sessionStorage.getItem(NS + 'session') || 'null'); } catch { return null; } }
-function setSession(u, keep) { const v = JSON.stringify(u); sessionStorage.setItem(NS + 'session', v); if (keep) localStorage.setItem(NS + 'session', v); }
+/* ================= AUTH (Firebase email/OAuth + local guest) ================= */
+let cloud = null;
+const loadCloud = () => (cloud ? Promise.resolve(cloud) : import('./cloud.js?v=20261122k').then((m) => (cloud = m)));
+function getSession() { try { return JSON.parse(sessionStorage.getItem(NS + 'session') || 'null'); } catch { return null; } } // guest only
+function setSession(u) { sessionStorage.setItem(NS + 'session', JSON.stringify(u)); }
 function clearSession() { sessionStorage.removeItem(NS + 'session'); localStorage.removeItem(NS + 'session'); }
-
 function termLine(html) { const t = $('#loginTerm'); const d = document.createElement('div'); d.innerHTML = html; t.append(d); while (t.children.length > 4) t.firstElementChild.remove(); }
-
-async function login(id, pw, keep) {
-  const users = LS.get('users', {});
-  const norm = id.trim().toLowerCase();
-  if (!/^[\w.\-가-힣]{2,32}$/.test(norm)) throw new Error('ID는 2~32자 (영문/숫자/한글/._-)');
-  if (users[norm]) {
-    const h = await sha256(users[norm].salt + ':' + pw);
-    if (h !== users[norm].hash) throw new Error('ACCESS DENIED · 패스프레이즈가 일치하지 않습니다');
-    termLine(`<span class="ok">✔</span> operator <b>${esc(norm)}</b> verified`);
-  } else {
-    const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    users[norm] = { salt, hash: await sha256(salt + ':' + pw), created: Date.now() };
-    LS.set('users', users);
-    termLine(`<span class="ok">✔</span> new local operator <b>${esc(norm)}</b> registered`);
-  }
-  return { id: norm, name: id.trim(), guest: false, keep };
+const AUTH_ERR = {
+  'auth/invalid-email': '이메일 형식이 올바르지 않습니다',
+  'auth/missing-password': '비밀번호를 입력하세요',
+  'auth/missing-email': '이메일을 입력하세요',
+  'auth/weak-password': '비밀번호는 8자 이상으로 설정하세요',
+  'auth/password-does-not-meet-requirements': '비밀번호 정책을 충족하지 않습니다',
+  'auth/email-already-in-use': '이미 가입된 이메일입니다 · 로그인 탭을 이용하세요',
+  'auth/invalid-credential': '이메일 또는 비밀번호가 일치하지 않습니다',
+  'auth/invalid-login-credentials': '이메일 또는 비밀번호가 일치하지 않습니다',
+  'auth/wrong-password': '이메일 또는 비밀번호가 일치하지 않습니다',
+  'auth/user-not-found': '가입되지 않은 이메일입니다',
+  'auth/user-disabled': '비활성화된 계정입니다',
+  'auth/too-many-requests': '시도가 너무 많습니다 · 잠시 후 다시 시도하세요',
+  'auth/popup-closed-by-user': '로그인 창이 닫혔습니다',
+  'auth/cancelled-popup-request': '로그인 창이 닫혔습니다',
+  'auth/popup-blocked': '팝업이 차단되었습니다 · 팝업 허용 후 다시 시도하세요',
+  'auth/account-exists-with-different-credential': '같은 이메일로 다른 로그인 방식이 이미 있습니다 · 기존 방식으로 로그인한 뒤 연동 패널에서 연결하세요',
+  'auth/credential-already-in-use': '이 외부 계정은 이미 다른 DARK CODE 사용자에 연결돼 있습니다',
+  'auth/provider-already-linked': '이미 연결된 서비스입니다',
+  'auth/requires-recent-login': '보안을 위해 다시 로그인한 뒤 시도하세요',
+  'auth/network-request-failed': '네트워크 오류 · 연결을 확인하세요',
+  'auth/unauthorized-domain': '승인되지 않은 도메인입니다',
+};
+const authMsg = (e) => AUTH_ERR[e?.code] || e?.message || String(e);
+let authMode = 'login';
+function setAuthMode(m) {
+  authMode = m;
+  $$('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
+  $$('#authFields [data-only]').forEach((el) => { el.hidden = el.dataset.only !== m; });
+  $$('#authFields [data-hide]').forEach((el) => { el.hidden = el.dataset.hide === m; });
+  $('#loginPw').required = m !== 'reset'; $('#loginPw2').required = m === 'signup';
+  $('#loginPw').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
+  $('#loginBtnTxt').textContent = { login: 'ACCESS WORKSPACE', signup: 'CREATE ACCOUNT', reset: 'SEND RESET LINK' }[m];
+  $('#loginErr').textContent = ''; $('#verifyBox').hidden = true; $('#authFields').hidden = false; $('#loginBtn').hidden = false;
 }
-async function bootTo(u) {
+function showVerify(u, msg) {
+  $('#authFields').hidden = true; $('#loginBtn').hidden = true; $('#verifyBox').hidden = false;
+  $('#verifyMsg').innerHTML = msg || `<b>${esc(u.email)}</b> 로 인증 메일을 보냈습니다. 메일의 링크를 누른 뒤 [인증 확인]을 눌러주세요.`;
+}
+function userFromFirebase(u) { return { id: u.uid, name: u.displayName || (u.email || 'operator').split('@')[0], email: u.email || '', guest: false, provider: u.providerData[0]?.providerId || 'password' }; }
+let gateStream = null;
+async function bootTo(u, quick) {
   user = u;
-  const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
-  const lines = [`<span class="g">$</span> mount workspace --user ${esc(u.id)}`, `<span class="ok">✔</span> free pool ${ready} provider(s) online · cache TTL ${opts.ttl}s`, `<span class="ok">✔</span> DARK CODE online · zero-claude default`];
-  for (const l of lines) { termLine(l); await sleep(260); }
+  if (!quick) {
+    const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
+    let info = null; if (!u.guest && cloud) { try { info = await cloud.sessionInfo(); } catch {} }
+    const lines = [
+      `<span class="g">$</span> mount workspace --user ${esc(u.email || u.id)}`,
+      info ? `<span class="ok">✔</span> session token issued · ${esc(info.provider)} · exp ${new Date(info.exp).toLocaleTimeString('ko-KR', { hour12: false })} (auto-refresh)` : '<span class="ok">✔</span> guest session · local only',
+      `<span class="ok">✔</span> pool ${ready} online · DARK CODE ready`,
+    ];
+    for (const l of lines) { termLine(l); await sleep(260); }
+  }
   const gate = $('#gate');
   gate.classList.add('leaving');
   $('#app').hidden = false;
   enterWorkspace();
-  setTimeout(() => { gate.hidden = true; gate.classList.remove('leaving'); $('#gateVideo').pause(); }, 750);
+  setTimeout(() => { gate.hidden = true; gate.classList.remove('leaving'); $('#gateVideo').pause(); gateStream?.stop(); }, quick ? 0 : 750);
 }
 function showGate() {
   const gate = $('#gate'); gate.hidden = false; $('#app').hidden = true;
   const v = $('#gateVideo');
   if (!v.src) v.src = innerWidth >= 900 ? 'assets/matrix-720.mp4' : 'assets/matrix-540.mp4';
   v.play().catch(() => {});
+  if (!gateStream && window.DCStream) gateStream = new DCStream.TokenStream($('#gateStream'), { size: 15 });
+  gateStream?.start();
   $('#loginTerm').innerHTML = `<div><span class="g">$</span> handshake --pool free --fallback ollama --brain claude</div><div class="dim">ready. 운영자 인증이 필요합니다.</div>`;
-  $('#loginErr').textContent = ''; $('#loginPw').value = '';
+  setAuthMode('login');
+  $('#loginPw').value = ''; $('#loginPw2').value = '';
   setTimeout(() => $('#loginId').focus(), 300);
+}
+// API keys live in the encrypted vault (IndexedDB, AES-GCM non-extractable key), never in localStorage/plain code
+async function loadVaultKeys() {
+  try {
+    await loadCloud();
+    const saved = LS.get('prov', {}); let migrated = false;
+    for (const p of Object.values(prov)) {
+      if (saved[p.id]?.key) { await cloud.vault.put('prov:' + p.id, saved[p.id].key); delete saved[p.id].key; migrated = true; }
+      const k = await cloud.vault.get('prov:' + p.id); if (k) p.key = k;
+    }
+    if (migrated) LS.set('prov', saved);
+  } catch (e) { console.warn('vault', e); }
+}
+
+/* ================= ONE-CLICK INTEGRATIONS ================= */
+const ICONS = {
+  google: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3zM12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22zM6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1a10 10 0 0 0 0 9.2L6.4 14zM12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10c.8-2.4 3-4.1 5.6-4.1z"/></svg>',
+  claude: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2l1.8 6.2L20 6l-4.2 4.9L22 12l-6.2 1.1L20 18l-6.2-2.2L12 22l-1.8-6.2L4 18l4.2-4.9L2 12l6.2-1.1L4 6l6.2 2.2z"/></svg>',
+  vercel: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 3l10 18H2z"/></svg>',
+  github: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 3 .8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>',
+  aside: '<svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M4 5h16v14H4zM9 5v14M12 9h5M12 13h5"/></svg>',
+};
+const INTEG = [
+  { id: 'google', name: 'Google', kind: 'oauth', desc: 'Google 계정 연결 · Firebase OAuth (토큰은 Firebase가 보관)' },
+  { id: 'claude', name: 'Claude', kind: 'key', desc: 'Anthropic API 키 · Zero-Claude 승격 게이트에서만 사용', ph: 'sk-ant-api03-…' },
+  { id: 'vercel', name: 'Vercel', kind: 'key', desc: 'Vercel 액세스 토큰 · 계정/팀/프로젝트 요약', ph: 'Vercel Access Token' },
+  { id: 'github', name: 'GitHub', kind: 'oauth', desc: 'GitHub OAuth (read:user) · 계정/저장소 요약' },
+  { id: 'aside', name: 'Aside', kind: 'pair', desc: 'Aside 브라우저 워크스페이스 · 공개 OAuth/API가 없어 계정 확인 방식' },
+];
+let integSum = {};
+function integStatus(svc) {
+  const s = integSum[svc.id];
+  if (svc.kind === 'oauth') {
+    const linked = cloud?.linkedProviders().includes(svc.id === 'google' ? 'google.com' : 'github.com');
+    if (linked && s && s.status !== 'stale') return 'on';
+    if (s || linked) return 're';
+    return 'off';
+  }
+  if (svc.kind === 'key') { const has = svc.id === 'claude' ? !!prov.claude.key : !!integKeys[svc.id]; if (s && has && s.status !== 'stale') return 'on'; if (s || has) return 're'; return 'off'; }
+  return s ? 'on' : 'off';
+}
+const integKeys = {}; // decrypted in memory only (from vault)
+async function openInteg() {
+  $('#integ').showModal();
+  if (!user || user.guest) { $('#integGrid').innerHTML = '<div class="pv-empty">외부 서비스 연동은 이메일/구글/깃허브 로그인 후 사용할 수 있습니다.<br>(게스트는 로컬 전용)</div>'; return; }
+  $('#integGrid').innerHTML = '<div class="pv-empty"><span class="spin-i"></span> 연동 상태 동기화 중…</div>';
+  try {
+    await loadCloud();
+    integKeys.vercel = await cloud.vault.get('integ:vercel');
+    integSum = await cloud.loadIntegrations();
+  } catch (e) { toast('연동 상태 로드 실패: ' + e.message); }
+  renderInteg();
+}
+function renderInteg() {
+  const grid = $('#integGrid'); grid.innerHTML = '';
+  for (const svc of INTEG) {
+    const st = integStatus(svc); const s = integSum[svc.id] || {};
+    const badge = { on: '연결됨', off: '미연결', re: '재연결 필요' }[st];
+    const card = document.createElement('div'); card.className = `ic st-${st}`; card.dataset.id = svc.id;
+    card.innerHTML = `
+      <div class="ic-h"><span class="ic-logo">${ICONS[svc.id]}</span><b>${svc.name}</b><em class="badge ${st}">${badge}</em></div>
+      <p class="ic-d">${esc(svc.desc)}</p>
+      <div class="ic-sum">${st === 'off' ? '<div><span>상태</span><b>연결 정보 없음</b></div>' : `<div><span>계정</span><b>${esc(s.account || '-')}</b></div><div><span>워크스페이스</span><b>${esc(s.workspace || '-')}</b></div><div><span>토큰</span><b>${esc(s.token || '-')}</b></div>`}</div>
+      ${svc.kind === 'key' ? `<input class="ic-key" type="password" autocomplete="off" spellcheck="false" placeholder="${st === 'off' ? esc(svc.ph) : '새 키 입력 시 교체 (비워두면 유지)'}">` : ''}
+      <div class="ic-log" hidden></div>
+      <div class="ic-btns"><button class="btn-sm ic-go">${st === 'off' ? '원클릭 연결' : '재연결'}</button>${st !== 'off' ? '<button class="btn-sm ic-off">해제</button>' : ''}</div>`;
+    card.querySelector('.ic-go').onclick = () => connectInteg(svc, card);
+    card.querySelector('.ic-off')?.addEventListener('click', () => disconnectInteg(svc, card));
+    grid.append(card);
+  }
+}
+function integLogger(card) {
+  const box = card.querySelector('.ic-log'); box.hidden = false; box.innerHTML = '';
+  return (msg, cls = '') => new Promise((res) => { const d = document.createElement('div'); d.className = cls; d.textContent = msg; box.append(d); box.scrollTop = box.scrollHeight; setTimeout(res, 160); });
+}
+async function connectInteg(svc, card) {
+  const log = integLogger(card); const btns = card.querySelectorAll('button'); btns.forEach((b) => (b.disabled = true));
+  try {
+    await loadCloud();
+    let sum;
+    if (svc.id === 'google' || svc.id === 'github') {
+      await log(`$ dc link --svc ${svc.id}${svc.id === 'github' ? ' --scope read:user' : ''}`);
+      await log(`> opening OAuth popup (${svc.id === 'google' ? 'accounts.google.com' : 'github.com/login/oauth'}) …`);
+      const r = await cloud.linkProvider(svc.id);
+      await log(`> handshake ok · ${r.relinked ? 're-authenticated' : 'provider linked to DARK CODE account'}`, 'ok');
+      if (svc.id === 'github') {
+        await log('> GET api.github.com/user …');
+        let gh = {}; if (r.accessToken) { const res = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${r.accessToken}`, Accept: 'application/vnd.github+json' } }); gh = res.ok ? await res.json() : {}; await log(`> ${res.status} ${res.ok ? 'OK' : 'FAIL'}`, res.ok ? 'ok' : 'warn'); }
+        sum = { account: gh.login ? '@' + gh.login : r.profile.email || r.profile.name || '-', workspace: gh.login ? `public repos ${gh.public_repos} · followers ${gh.followers}` : 'GitHub 계정', token: 'OAuth · 저장 안 함 (Firebase 연결만 유지)' };
+      } else sum = { account: r.profile.email || '-', workspace: r.profile.name || 'Google 계정', token: 'OAuth · Firebase 보관' };
+    } else if (svc.kind === 'key') {
+      const inp = card.querySelector('.ic-key'); let key = inp.value.trim();
+      if (!key) key = svc.id === 'claude' ? prov.claude.key : integKeys[svc.id];
+      if (!key) throw new Error('키를 입력하세요');
+      await log(`$ dc link --svc ${svc.id} --verify`);
+      if (svc.id === 'claude') {
+        await log('> GET api.anthropic.com/v1/models (토큰 소모 0)');
+        const res = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' } });
+        if (!res.ok) throw new Error(`검증 실패 ${res.status} · 키를 확인하세요`);
+        const j = await res.json(); await log(`> 200 OK · models ${j.data?.length || 0}`, 'ok');
+        await cloud.vault.put('prov:claude', key); prov.claude.key = key; prov.claude.enabled = true; prov.claude.health = 1; prov.claude.cooldownUntil = 0; saveProviders();
+        sum = { account: 'Anthropic API', workspace: `models ${j.data?.length || 0} · 기본 ${prov.claude.model}`, token: cloud.mask(key) };
+      } else {
+        await log('> GET api.vercel.com/v2/user');
+        const H = { Authorization: `Bearer ${key}` };
+        const ures = await fetch('https://api.vercel.com/v2/user', { headers: H });
+        if (!ures.ok) throw new Error(`검증 실패 ${ures.status} · 토큰을 확인하세요`);
+        const uj = (await ures.json()).user || {}; await log(`> 200 OK · ${uj.username || uj.email}`, 'ok');
+        let teams = 0, projects = 0;
+        try { const t = await fetch('https://api.vercel.com/v2/teams', { headers: H }); if (t.ok) teams = ((await t.json()).teams || []).length; } catch {}
+        try { const p = await fetch('https://api.vercel.com/v9/projects?limit=100', { headers: H }); if (p.ok) projects = ((await p.json()).projects || []).length; } catch {}
+        await log(`> teams ${teams} · projects ${projects}`);
+        await cloud.vault.put('integ:vercel', key); integKeys.vercel = key;
+        sum = { account: uj.username ? '@' + uj.username : uj.email || '-', workspace: `teams ${teams} · projects ${projects}`, token: cloud.mask(key) };
+      }
+      await log('> key sealed in encrypted vault (AES-GCM · non-extractable)', 'ok');
+      inp.value = '';
+    } else {
+      await log('$ dc link --svc aside --mode account-check');
+      await log('> Aside는 공개 OAuth/API가 없어 계정 일치 확인으로 연결합니다');
+      sum = { account: user.email, workspace: 'Aside 브라우저 (계정 확인 연결)', token: '토큰 없음 · 공개 API 미제공' };
+    }
+    await cloud.saveIntegration(svc.id, { ...sum, status: 'connected', kind: svc.kind });
+    integSum[svc.id] = { ...sum, status: 'connected' };
+    await log(`✔ ${svc.name} 연결됨 · 요약 동기화 (users/{uid}/integrations/${svc.id})`, 'ok');
+    toast(`${svc.name} 연결됨`);
+    setTimeout(renderInteg, 900);
+  } catch (e) {
+    await log(`✖ ${authMsg(e)}`, 'err');
+    if (integSum[svc.id]) { integSum[svc.id].status = 'stale'; }
+    btns.forEach((b) => (b.disabled = false));
+  }
+}
+async function disconnectInteg(svc, card) {
+  const log = integLogger(card);
+  try {
+    await log(`$ dc unlink --svc ${svc.id}`);
+    if (svc.kind === 'oauth' && cloud.linkedProviders().includes(svc.id === 'google' ? 'google.com' : 'github.com')) await cloud.unlinkProvider(svc.id);
+    if (svc.id === 'claude') { await cloud.vault.del('prov:claude'); prov.claude.key = ''; saveProviders(); }
+    if (svc.id === 'vercel') { await cloud.vault.del('integ:vercel'); integKeys.vercel = ''; }
+    await cloud.removeIntegration(svc.id); delete integSum[svc.id];
+    await log('✔ 해제 완료 · 로컬 키/요약 삭제', 'ok');
+    setTimeout(renderInteg, 600); renderPool(); renderStatus();
+  } catch (e) { await log(`✖ ${authMsg(e)}`, 'err'); }
+}
+
+/* ================= REMOTE SUPPORT (requester side, consent-based) ================= */
+const REMOTE_TASKS = [['diagnose', '시스템 진단'], ['cleanup', '임시/불필요 파일 정리'], ['optimize', '성능 최적화']];
+let remote = { sid: null, unsub: null, data: null, tick: null };
+function openRemote() { $('#remote').showModal(); renderRemote(); }
+function consentUrl(sid) { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'consent.html?sid=' + sid; }
+function renderRemote() {
+  const body = $('#remoteBody');
+  if (!user || user.guest) { body.innerHTML = '<div class="pv-empty">원격 지원 요청은 로그인한 계정만 만들 수 있습니다 (요청자 신원이 수락 화면에 표시됨).</div>'; return; }
+  const d = remote.data;
+  const statusTxt = { pending: '응답 대기', accepted: '승인됨 · 세션 활성', denied: '거절됨 · 차단', expired: '만료 · 폐기', cancelled: '취소됨', ended: '세션 종료' };
+  body.innerHTML = `
+    <p class="modal-note">대상자가 링크를 열어 <b>직접 수락</b>해야만 세션이 활성화됩니다. 거절·시간 초과 시 즉시 폐기되며 양쪽 화면에 같은 상태가 실시간 동기화됩니다. 브라우저는 대상 PC 파일에 접근하지 않으며, 실제 원격 작업은 대상자가 원격 지원 프로그램에서 다시 허용해야 합니다.</p>
+    ${!d || ['denied', 'expired', 'cancelled', 'ended'].includes(d.status) ? `
+    <div class="rm-form">
+      <label class="rm-l">요청 메모 (대상자 화면에 표시)<textarea id="rmNote" maxlength="300" placeholder="예: 어제 말씀하신 PC 느려짐 점검 요청입니다 - 윤태현"></textarea></label>
+      <div class="rm-tasks">${REMOTE_TASKS.map(([k, v]) => `<label><input type="checkbox" value="${k}" checked> ${v}</label>`).join('')}</div>
+      <label class="rm-l inline">만료 <select id="rmMin"><option value="3">3분</option><option value="5" selected>5분</option><option value="10">10분</option></select></label>
+      <button class="btn-neon sm" id="rmCreate">수락 요청 링크 생성</button>
+    </div>` : ''}
+    ${d ? `
+    <div class="rm-card st-${d.status}">
+      <div class="rm-top"><b>${statusTxt[d.status] || d.status}</b><span class="rm-timer" id="rmTimer"></span></div>
+      <div class="rm-row"><span>SESSION</span><code>${remote.sid.slice(0, 4)}-${remote.sid.slice(4, 8)}-${remote.sid.slice(-4)}</code></div>
+      <div class="rm-link"><input readonly value="${consentUrl(remote.sid)}"><button class="btn-sm" id="rmCopy">복사</button><a class="btn-sm" href="${consentUrl(remote.sid)}" target="_blank" rel="noopener">열기</a></div>
+      ${d.status === 'accepted' && d.target ? `<div class="rm-env">${Object.entries(d.target).map(([k, v]) => `<span>${esc(k)} <b>${esc(v ?? '-')}</b></span>`).join('')}</div>` : ''}
+      ${d.status === 'accepted' ? `<div class="rm-log" id="rmLog">${(d.log || []).slice(-30).map((l) => `<div>${new Date(l.t).toLocaleTimeString('ko-KR', { hour12: false })} ${esc(l.msg)}</div>`).join('') || '<div>대상자 화면에 표시할 안내 메시지를 보내세요.</div>'}</div>
+        <div class="rm-send"><input id="rmMsg" maxlength="240" placeholder="대상자에게 보낼 안내 (예: AnyDesk 주소를 알려주세요)"><button class="btn-sm" id="rmSend">전송</button></div>` : ''}
+      <div class="rm-btns">${d.status === 'pending' ? '<button class="btn-sm" id="rmCancel">요청 취소</button>' : ''}${d.status === 'accepted' ? '<button class="btn-sm" id="rmEnd">세션 종료</button>' : ''}</div>
+    </div>` : ''}`;
+  $('#rmCreate')?.addEventListener('click', createRemoteReq);
+  $('#rmCopy')?.addEventListener('click', () => { navigator.clipboard.writeText(consentUrl(remote.sid)); toast('수락 링크 복사됨'); });
+  $('#rmCancel')?.addEventListener('click', () => cloud.cancelRemote(remote.sid).catch((e) => toast(e.message)));
+  $('#rmEnd')?.addEventListener('click', () => cloud.endRemote(remote.sid, 'requester').catch((e) => toast(e.message)));
+  const send = () => { const v = $('#rmMsg').value.trim(); if (!v) return; $('#rmMsg').value = ''; cloud.logRemote(remote.sid, v).catch((e) => toast(e.message)); };
+  $('#rmSend')?.addEventListener('click', send);
+  $('#rmMsg')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  const lg = $('#rmLog'); if (lg) lg.scrollTop = lg.scrollHeight;
+  remoteTimer();
+}
+function remoteTimer() {
+  clearInterval(remote.tick);
+  const d = remote.data; if (!d) return;
+  const el = () => $('#rmTimer');
+  const step = () => {
+    if (d.status !== 'pending') { if (el()) el().textContent = d.status === 'accepted' ? 'ACTIVE' : ''; return; }
+    const left = (d.expiresAt?.toMillis?.() || 0) - Date.now();
+    if (el()) el().textContent = `${String(Math.floor(Math.max(0, left) / 60000)).padStart(2, '0')}:${String(Math.floor(Math.max(0, left) / 1000) % 60).padStart(2, '0')}`;
+    if (left <= 0) { clearInterval(remote.tick); cloud.expireRemote(remote.sid).catch(() => {}); }
+  };
+  step(); remote.tick = setInterval(step, 1000);
+}
+async function createRemoteReq() {
+  const btn = $('#rmCreate'); btn.disabled = true;
+  try {
+    await loadCloud();
+    const tasks = $$('.rm-tasks input:checked').map((i) => i.value);
+    if (!tasks.length) throw new Error('수행 예정 작업을 하나 이상 선택하세요');
+    const sid = await cloud.createRemote({ note: $('#rmNote').value.trim(), tasks, minutes: Number($('#rmMin').value) });
+    remote.unsub?.(); remote.sid = sid; remote.data = null;
+    let prev = null;
+    remote.unsub = await cloud.watchRemote(sid, (s) => {
+      remote.data = s;
+      if (s && prev && prev !== s.status) { toast(`원격 지원: ${({ accepted: '대상자가 수락했습니다', denied: '대상자가 거절했습니다 · 차단', expired: '시간 초과 · 세션 폐기', ended: '세션 종료', cancelled: '요청 취소됨' })[s.status] || s.status}`); TEL()?.log(`remote ${sid.slice(0, 4)} → ${s.status}`, s.status === 'accepted' ? 'ok' : 'warn'); }
+      prev = s?.status;
+      if ($('#remote').open) renderRemote();
+    }, (e) => toast('동기화 오류: ' + e.message));
+    TEL()?.log(`remote session ${sid.slice(0, 4)}… created · awaiting consent`, 'k');
+  } catch (e) { toast(authMsg(e)); btn.disabled = false; }
 }
 
 /* ================= WORKSPACE WIRING ================= */
@@ -1199,20 +1448,64 @@ function wire() {
   // gate
   const clock = () => { const d = new Date(); $('#gateClock').textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
   clock(); setInterval(clock, 1000);
+  $$('#authTabs button').forEach((b) => (b.onclick = () => { setAuthMode(b.dataset.m); termLine(`<span class="g">$</span> auth --mode ${b.dataset.m}`); }));
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    $('#loginErr').textContent = ''; $('#loginBtn').disabled = true;
-    termLine(`<span class="g">$</span> auth --operator ${esc($('#loginId').value.trim())}`);
+    const btn = $('#loginBtn'); $('#loginErr').textContent = ''; btn.disabled = true;
+    const email = $('#loginId').value.trim(), pw = $('#loginPw').value, keep = $('#loginKeep').checked;
     try {
-      await sleep(350);
-      const u = await login($('#loginId').value, $('#loginPw').value, $('#loginKeep').checked);
-      setSession(u, $('#loginKeep').checked);
-      await bootTo(u);
-    } catch (err) { $('#loginErr').textContent = err.message; termLine(`<span style="color:#ff4d6d">✖ ${esc(err.message)}</span>`); }
-    finally { $('#loginBtn').disabled = false; }
+      await loadCloud();
+      if (authMode === 'reset') {
+        termLine(`<span class="g">$</span> auth --reset ${esc(email)}`);
+        await cloud.resetPassword(email);
+        termLine('<span class="ok">✔</span> reset link dispatched');
+        $('#loginErr').innerHTML = `<span class="ok-msg">재설정 링크를 ${esc(email)} 로 보냈습니다. 메일의 링크에서 새 비밀번호를 정한 뒤 로그인하세요.</span>`;
+        return;
+      }
+      if (authMode === 'signup') {
+        if (pw.length < 8) throw new Error('비밀번호는 8자 이상으로 설정하세요');
+        if (pw !== $('#loginPw2').value) throw new Error('비밀번호 확인이 일치하지 않습니다');
+        termLine(`<span class="g">$</span> auth --signup ${esc(email)}`);
+        const u = await cloud.signUp(email, pw, $('#signName').value.trim(), keep);
+        termLine('<span class="ok">✔</span> account created · verification mail sent');
+        showVerify(u);
+        return;
+      }
+      termLine(`<span class="g">$</span> auth --operator ${esc(email)}`);
+      const u = await cloud.signIn(email, pw, keep);
+      if (!cloud.isTrusted(u)) { termLine('<span style="color:#facc15">…</span> email not verified'); showVerify(u, `<b>${esc(u.email)}</b> 이메일 인증이 아직 안 됐습니다. 받은 메일의 링크를 누른 뒤 [인증 확인]을 눌러주세요.`); return; }
+      termLine('<span class="ok">✔</span> credentials verified');
+      await bootTo(userFromFirebase(u));
+    } catch (err) { $('#loginErr').textContent = authMsg(err); termLine(`<span style="color:#ff4d6d">✖ ${esc(authMsg(err))}</span>`); }
+    finally { btn.disabled = false; }
   });
-  $('#guestBtn').onclick = async () => { const u = { id: 'guest', name: 'guest', guest: true }; setSession(u, false); termLine('<span class="g">$</span> auth --guest'); await bootTo(u); };
-  $('#logoutBtn').onclick = () => { if (state.running) state.running.abort(); dashboard?.stop(); waterfall?.stop(); clearSession(); user = null; showGate(); };
+  $('#verifyCheck').onclick = async () => {
+    try { await loadCloud(); const u = await cloud.reloadUser(); if (u && cloud.isTrusted(u)) { termLine('<span class="ok">✔</span> email verified'); await bootTo(userFromFirebase(u)); } else $('#loginErr').textContent = '아직 인증되지 않았습니다 · 메일의 링크를 먼저 눌러주세요'; }
+    catch (e) { $('#loginErr').textContent = authMsg(e); }
+  };
+  $('#verifyResend').onclick = async () => { try { await cloud.resendVerification(); toast('인증 메일을 다시 보냈습니다'); } catch (e) { $('#loginErr').textContent = authMsg(e); } };
+  $('#verifyBack').onclick = async () => { try { await cloud?.signOutUser(); } catch {} setAuthMode('login'); };
+  for (const [sel, pid] of [['#oauthGoogle', 'google'], ['#oauthGithub', 'github']]) {
+    $(sel).onclick = async () => {
+      $('#loginErr').textContent = '';
+      try {
+        await loadCloud();
+        termLine(`<span class="g">$</span> oauth --provider ${pid} --popup`);
+        const r = await cloud.signInWith(pid, $('#loginKeep').checked);
+        termLine(`<span class="ok">✔</span> ${pid} identity confirmed`);
+        await bootTo(userFromFirebase(r.user));
+      } catch (e) { $('#loginErr').textContent = authMsg(e); termLine(`<span style="color:#ff4d6d">✖ ${esc(authMsg(e))}</span>`); }
+    };
+  }
+  $('#guestBtn').onclick = async () => { const u = { id: 'guest', name: 'guest', guest: true }; setSession(u); termLine('<span class="g">$</span> auth --guest'); await bootTo(u); };
+  $('#logoutBtn').onclick = async () => {
+    if (state.running) state.running.abort(); dashboard?.stop(); waterfall?.stop();
+    remote.unsub?.(); remote = { sid: null, unsub: null, data: null, tick: null };
+    clearSession(); if (user && !user.guest && cloud) { try { await cloud.signOutUser(); } catch {} }
+    user = null; showGate();
+  };
+  $('#integBtn').onclick = openInteg; $('#integClose').onclick = () => $('#integ').close();
+  $('#remoteBtn').onclick = openRemote; $('#remoteClose').onclick = () => $('#remote').close();
 
   // composer
   const ta = $('#prompt');
@@ -1277,6 +1570,18 @@ function wire() {
 }
 
 wire();
-const sess = getSession();
-if (sess) { user = sess; $('#gate').hidden = true; $('#app').hidden = false; enterWorkspace(); }
-else showGate();
+(async () => {
+  const g = getSession();
+  loadVaultKeys().then(() => { renderPool(); renderRouteSel(); renderStatus(); });
+  if (g?.guest) { user = g; $('#gate').hidden = true; $('#app').hidden = false; enterWorkspace(); return; }
+  showGate();
+  try {
+    await loadCloud();
+    let first = true;
+    await cloud.onUser(async (u) => {
+      if (!first) return; first = false; // restore an existing Firebase session once
+      if (u && cloud.isTrusted(u)) await bootTo(userFromFirebase(u), true);
+      else if (u) showVerify(u);
+    });
+  } catch (e) { console.warn('cloud init', e); termLine('<span style="color:#ff4d6d">✖ auth server unreachable · 게스트 모드는 사용 가능</span>'); }
+})();
