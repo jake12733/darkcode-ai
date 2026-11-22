@@ -414,6 +414,7 @@ class CodeRain {
 }
 
 /* ================= RENDER: MARKDOWN ================= */
+const IMG_BLOBS = {}; // generated image URL -> object URL (avoid re-hitting free rate limits)
 marked.setOptions({ gfm: true, breaks: false });
 function renderMd(md) {
   const html = DOMPurify.sanitize(marked.parse(md || ''), { ADD_ATTR: ['target'] });
@@ -429,6 +430,7 @@ function renderMd(md) {
     pre.prepend(head);
   });
   $$('a', box).forEach((a) => { a.target = '_blank'; a.rel = 'noopener'; });
+  $$('img', box).forEach((img) => { const b = IMG_BLOBS[img.getAttribute('src')]; if (b) img.src = b; img.loading = 'lazy'; });
   return box;
 }
 
@@ -637,8 +639,22 @@ async function runImage(prompt, run) {
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(en)}?width=1280&height=768&nologo=true&seed=${seed}`;
   run.log(`image  pipeline → Pollinations (무료·키 없음) seed=${seed} · Cloudflare 이미지 경로는 프록시 설정 시 사용`, 'route');
   const t0 = performance.now();
-  await new Promise((res, rej) => { const im = new Image(); im.onload = res; im.onerror = () => rej(new ProvError(502, '이미지 생성 실패')); im.src = url; run.signal.addEventListener('abort', () => rej(new ProvError(0, '사용자 중단', 'abort'))); });
-  run.log(`done   image ${Math.round(performance.now() - t0)}ms`, 'ok');
+  const ctl = new AbortController();
+  const onAb = () => ctl.abort();
+  run.signal.addEventListener('abort', onAb, { once: true });
+  const to = setTimeout(() => ctl.abort(), 120000);
+  let blob;
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new ProvError(res.status, `이미지 서버 ${res.status}${res.status === 429 ? ' (무료 한도: 약 45초에 1장)' : ''}`);
+    blob = await res.blob();
+    if (!blob.type.startsWith('image/')) throw new ProvError(502, '이미지가 아닌 응답');
+  } catch (e) {
+    if (run.signal.aborted) throw new ProvError(0, '사용자 중단', 'abort');
+    throw e instanceof ProvError ? e : new ProvError(504, `이미지 생성 실패 (${e.message})`);
+  } finally { clearTimeout(to); run.signal.removeEventListener('abort', onAb); }
+  IMG_BLOBS[url] = URL.createObjectURL(blob);
+  run.log(`done   image ${Math.round(performance.now() - t0)}ms · ${Math.round(blob.size / 1024)}KB`, 'ok');
   run.calls.push({ label: 'image', provider: 'Pollinations', short: 'POLLI', pid: 'pollinations', model: 'flux' });
   return `## 합의 요약\n- 요청을 영문 이미지 프롬프트로 최적화한 뒤 무료 이미지 파이프라인으로 생성했습니다.\n- 같은 프롬프트에 seed만 바꾸면 변형을 만들 수 있습니다.\n## 자율 실행 산출물\n![generated](${url})\n\n**프롬프트(EN)**\n\`\`\`text\n${en}\n\`\`\`\n\n- 원본 URL: ${url}\n- 변형: seed 값을 바꿔 재생성 · 비율은 width/height 파라미터로 조정\n## 세션 상태 스냅샷\n\`\`\`yaml\nuser_goal: "${raw.replace(/"/g, "'").slice(0, 80)}"\ncompleted_steps: ["프롬프트 최적화", "이미지 생성 (seed ${seed})"]\nactive_artifacts: ["generated image 1280x768"]\npending_tasks: ["필요 시 변형/업스케일"]\nconstraints: ["무료 파이프라인 · 상업 이용 전 라이선스 확인"]\n\`\`\``;
 }
@@ -705,12 +721,18 @@ function buildPreviewDoc(a) {
     if (js) { doc = doc.replace(/<script[^>]+src=["'][^"']*(app|script|main)\.js["'][^>]*><\/script>/i, ''); if (!doc.includes(js.slice(0, 40))) doc = doc.replace(/<\/body>/i, `<script>${js}<\/script></body>`); }
     return doc;
   }
-  if (a.img) return `<!doctype html><html><body style="margin:0;background:#000;display:grid;place-items:center;min-height:100vh"><img src="${a.img}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`;
   const body = DOMPurify.sanitize(marked.parse(a.doc || ''));
   return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:28px;background:#000;color:#d7f5e1;font:15px/1.75 system-ui,sans-serif}h1,h2,h3{color:#00FF66}pre{background:#031008;border:1px solid #11261a;padding:12px;border-radius:8px;overflow:auto}code{color:#a7ffc9}a{color:#00FF66}table{border-collapse:collapse}td,th{border:1px solid #1b3a27;padding:6px 10px}</style></head><body>${body}</body></html>`;
 }
 function setPreview(doc) {
   const fr = $('#pvFrame');
+  let pi = $('#pvImg');
+  if (!pi) { pi = document.createElement('img'); pi.id = 'pvImg'; pi.alt = 'generated'; pi.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;display:none'; $('#pvStage').append(pi); }
+  const htmlFile = artifacts?.files.some((f) => f.lang === 'html');
+  if (artifacts?.img && !htmlFile) {
+    fr.style.display = 'none'; pi.style.display = 'block'; pi.src = IMG_BLOBS[artifacts.img] || artifacts.img; $('#pvUrl').textContent = 'preview://image'; return;
+  }
+  fr.style.display = ''; pi.style.display = 'none';
   if (!doc) { fr.srcdoc = `<body style="margin:0;background:#000;color:#4f6e5a;font:12px monospace;display:grid;place-items:center;height:100vh">// 미리보기할 산출물이 없습니다</body>`; $('#pvUrl').textContent = 'preview://empty'; return; }
   fr.srcdoc = doc; $('#pvUrl').textContent = `preview://${artifacts?.files.find((f) => f.lang === 'html')?.name || (artifacts?.img ? 'image' : 'document')}`;
 }
