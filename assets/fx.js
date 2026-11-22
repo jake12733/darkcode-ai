@@ -155,10 +155,44 @@
       const mv = $('memVals'); if (mv) mv.innerHTML = pm ? `<span>HEAP <b>${(pm.usedJSHeapSize / 1048576).toFixed(1)}</b>/${(pm.totalJSHeapSize / 1048576).toFixed(0)} MB</span><span>DEVICE <b>${navigator.deviceMemory || '?'}</b> GB</span>` : `<span>HEAP <b>${this.cur.mem.toFixed(0)}%</b> (SIM)</span>`;
       const mb = $('memBadge'); if (mb) { mb.textContent = pm ? 'LIVE HEAP' : 'SIM'; mb.className = pm ? 'live' : ''; }
       const cb = $('cpuBadge'); if (cb) { cb.textContent = 'MAIN THREAD'; cb.className = 'live'; }
-      this.procTick(); this.kpis();
+      this.procTick(); this.kpis(); this.security();
+      if (!this.stT || Date.now() - this.stT > 5000) { this.stT = Date.now(); this.storage(); }
       // radar contacts
       if (Math.random() < 0.5) this.contacts.push({ a: rnd(0, Math.PI * 2), r: rnd(0.25, 0.95), life: 1 });
       this.contacts = this.contacts.filter((c) => (c.life -= 0.08) > 0);
+    }
+    security() {
+      const el = $('secBody'); if (!el) return;
+      const fails = telemetry.recent(60000).filter((c) => !c.ok);
+      const box = $('secPanel');
+      if (fails.length) {
+        const f = fails[fails.length - 1];
+        box?.classList.add('alert');
+        el.innerHTML = `<div class="sec-ico">&#9888;</div><div><b>ROUTER ALERT</b><p>${f.short} · ${f.status} · failover engaged</p><code>Trace: 0x${Math.floor(f.t * 1000).toString(16).toUpperCase().slice(-8)} · ${fails.length} event(s)/60s</code></div>`;
+        return;
+      }
+      box?.classList.remove('alert');
+      if (!this.secT || Date.now() - this.secT > 6000) {
+        this.secT = Date.now();
+        const ip = `${(rnd(20, 223)) | 0}.${(rnd(0, 255)) | 0}.${(rnd(0, 255)) | 0}.${(rnd(1, 254)) | 0}`;
+        const ev = [['PORT SCAN BLOCKED', `src ${ip} · dropped`], ['INTEGRITY CHECK', 'core modules sha256 verified'], ['FIREWALL HIT', `rule 0x${Math.floor(rnd(0, 0xffff)).toString(16).toUpperCase()} · ${ip}`], ['KEY VAULT SEALED', 'api keys local-only · never transmitted'], ['ANOMALY SCAN', 'no unauthorized access detected']];
+        const [t, d] = ev[(Math.random() * ev.length) | 0];
+        el.innerHTML = `<div class="sec-ico ok">&#9737;</div><div><b>${t}</b><p>${d}</p><code>Trace: 0x${Math.floor(rnd(0, 0xffffffff)).toString(16).toUpperCase().padStart(8, '0')} <sup>SIM</sup></code></div>`;
+      }
+    }
+    storage() {
+      const el = $('stoBody'); if (!el) return;
+      const cat = { Data: 0, System: 0, Logs: 0, Backup: 0 };
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i); if (!k || !k.startsWith('pst:')) continue;
+          const n = (localStorage.getItem(k) || '').length * 2;
+          if (k.startsWith('pst:threads')) cat.Data += n; else if (/^pst:(c:|cidx)/.test(k)) cat.Backup += n; else if (/^pst:(health|claude|free)/.test(k)) cat.Logs += n; else cat.System += n;
+        }
+      } catch {}
+      const max = Math.max(1, ...Object.values(cat));
+      const lab = { Data: '작업 히스토리', System: '설정·계정', Logs: '헬스·사용량', Backup: '응답 캐시' };
+      el.innerHTML = Object.entries(cat).map(([k, v]) => `<div class="sto"><span class="fold"></span><b>${k}</b><small>${lab[k]}</small><em>${v > 1048576 ? (v / 1048576).toFixed(1) + ' MB' : (v / 1024).toFixed(1) + ' KB'}</em><i><u style="width:${Math.max(2, (v / max) * 100)}%"></u></i></div>`).join('');
     }
     kpis() {
       const k = $('kpis'); if (!k) return;

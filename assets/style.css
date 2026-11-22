@@ -311,7 +311,23 @@ details.runlog .logbox{max-height:260px}
 /* ===================== DARK CODE additions ===================== */
 .logo-glow{filter:drop-shadow(0 0 5px rgba(0,255,102,.8)) drop-shadow(0 0 16px rgba(0,255,102,.35));animation:logoPulse 3.2s ease-in-out infinite}
 @keyframes logoPulse{50%{filter:drop-shadow(0 0 8px rgba(0,255,102,1)) drop-shadow(0 0 26px rgba(0,255,102,.55))}}
-.login-emblem{display:block;width:86px;height:86px;margin:-4px auto 12px}
+.login-emblem{display:block;width:118px;height:118px;margin:-8px auto 12px;border-radius:50%}
+.brand-logo,.side-brand img,.hero-logo{border-radius:50%}
+.sec-body{display:flex;gap:12px;align-items:center;min-height:86px}
+.sec-ico{flex:none;width:46px;height:46px;display:grid;place-items:center;border:1.5px solid var(--warn);border-radius:10px;color:var(--warn);font-size:24px;animation:blink 1s infinite}
+.sec-ico.ok{border-color:rgba(0,255,102,.5);color:var(--neon);animation:none;box-shadow:0 0 14px rgba(0,255,102,.2)}
+.sec-body b{display:block;font:700 12px var(--mono);letter-spacing:.1em;color:#eafff1}
+.sec-body p{margin:5px 0;font-size:12px;color:var(--mut)}
+.sec-body code{font:10.5px var(--mono);color:var(--g1)}
+.sec-body sup{font-size:8px;color:var(--mut2)}
+.dp.sec.alert{border-color:rgba(250,204,21,.6);box-shadow:0 0 22px rgba(250,204,21,.12)}
+.dp.sec.alert .sec-body b{color:var(--warn)}
+.sto-list{display:flex;flex-direction:column;gap:7px}
+.sto{display:grid;grid-template-columns:18px 58px 1fr auto;gap:2px 8px;align-items:center;font:11px var(--mono);color:var(--mut)}
+.sto .fold{width:16px;height:12px;border-radius:2px;background:linear-gradient(180deg,#22C55E,#0f7a35);position:relative;box-shadow:0 0 8px rgba(0,255,102,.3)}
+.sto .fold::before{content:"";position:absolute;top:-3px;left:0;width:7px;height:4px;border-radius:2px 2px 0 0;background:#22C55E}
+.sto b{color:#eafff1}.sto small{font-size:10px;color:var(--mut2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sto em{font-style:normal;color:var(--g1)}
+.sto i{grid-column:2/-1;height:3px;border-radius:2px;background:#0b2014;overflow:hidden}.sto i u{display:block;height:100%;background:var(--neon);box-shadow:0 0 6px var(--neon);transition:width .6s}
 .login-card .login-logo{text-align:center;font-family:var(--mono);letter-spacing:.14em;font-size:27px}
 .login-card .login-sub{text-align:center}
 .brand{display:flex;align-items:center;gap:9px;font-family:var(--mono);letter-spacing:.1em;font-size:15px}
@@ -332,7 +348,7 @@ details.runlog .logbox{max-height:260px}
 .dash-rain{position:absolute;inset:0;width:100%;height:100%;opacity:.35;pointer-events:none;display:block}
 .dash-inner{position:absolute;inset:0;overflow:auto;padding:18px 18px 28px}
 .dash-hero{display:flex;align-items:center;gap:16px;margin-bottom:12px}
-.hero-logo{width:64px;height:64px}
+.hero-logo{width:92px;height:92px}
 .hero-txt h1{margin:0;font:800 26px/1 var(--mono);letter-spacing:.16em;color:#eafff1}
 .hero-txt h1 b{color:var(--neon);text-shadow:0 0 18px rgba(0,255,102,.6)}
 .hero-txt p{margin:7px 0 0;font:11px var(--mono);letter-spacing:.08em;color:var(--g2)}
