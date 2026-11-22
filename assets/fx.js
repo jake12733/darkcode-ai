@@ -192,7 +192,7 @@
       } catch {}
       const max = Math.max(1, ...Object.values(cat));
       const lab = { Data: '작업 히스토리', System: '설정·계정', Logs: '헬스·사용량', Backup: '응답 캐시' };
-      el.innerHTML = Object.entries(cat).map(([k, v]) => `<div class="sto"><span class="fold"></span><b>${k}</b><small>${lab[k]}</small><em>${v > 1048576 ? (v / 1048576).toFixed(1) + ' MB' : (v / 1024).toFixed(1) + ' KB'}</em><i><u style="width:${Math.max(2, (v / max) * 100)}%"></u></i></div>`).join('');
+      el.innerHTML = Object.entries(cat).map(([k, v]) => `<div class="sto"><span class="fold"></span><b>${k}</b><small>${lab[k]}</small><em>${v > 1048576 ? (v / 1048576).toFixed(1) + ' MB' : v >= 1024 ? (v / 1024).toFixed(1) + ' KB' : v + ' B'}</em><i><u style="width:${Math.max(2, (v / max) * 100)}%"></u></i></div>`).join('');
     }
     kpis() {
       const k = $('kpis'); if (!k) return;
