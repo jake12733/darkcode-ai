@@ -509,7 +509,7 @@ function render() {
 }
 function renderLock() {
   const lk = $('#lock'), st = S.state; let ico = LOCK_SVG, t, d, cls = '';
-  if (st === 'IDLE') { t = 'NO SESSION'; d = '왼쪽에서 수락 요청 링크를 만들어 대상자에게 보내세요. 대상자가 직접 수락하기 전에는 제어 캔버스와 입력 전송이 잠겨 있습니다.'; }
+  if (st === 'IDLE') { t = 'NO SESSION'; d = 'SESSION REQUEST에서 수락 요청 링크를 만들어 대상자에게 보내세요. 대상자가 직접 수락하기 전에는 제어 캔버스와 입력 전송이 잠겨 있습니다.'; }
   else if (st === 'PENDING') { t = 'CONTROL LOCKED'; cls = 'wait'; d = `대상자 수락 대기 중 · ${mmss(tm(S.sess?.expiresAt) - Date.now())} 남음. 수락 전에는 화면 수신과 입력 전송이 모두 차단됩니다.`; }
   else if (st === 'ACCEPTED') {
     ico = OPEN_SVG; cls = 'wait';
