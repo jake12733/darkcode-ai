@@ -6,12 +6,13 @@
 <title>DARK CODE · Core Terminal</title>
 <meta name="description" content="DARK CODE 코어 오케스트레이터 - 무료 클라우드 API 풀 순환, 로컬 Ollama 폴백, Claude 최종 통합, 실시간 코드 스트림 워크스페이스">
 <meta name="theme-color" content="#000000">
-<link rel="icon" href="assets/logo-emblem.svg" type="image/svg+xml">
+<link rel="icon" href="assets/dc-logo-64.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/dc-logo-160.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="assets/style.css?v=20261122e">
+<link rel="stylesheet" href="assets/style.css?v=20261122f">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -28,7 +29,7 @@
     <span class="gate-clock" id="gateClock">--:--:--</span>
   </div>
   <form id="loginForm" class="login-card" autocomplete="on">
-    <img class="login-emblem logo-glow" src="assets/logo-emblem.svg" alt="DARK CODE 로고">
+    <img class="login-emblem logo-glow" src="assets/dc-logo-512.webp" alt="DARK CODE 로고">
     <div class="login-logo">DARK <b>CODE</b></div>
     <div class="login-sub">CORE ORCHESTRATOR · AUTONOMOUS AGENT</div>
     <div class="login-term" id="loginTerm">
@@ -54,7 +55,7 @@
 <div id="app" class="app" hidden>
   <header class="topbar">
     <button class="icon-btn only-m" id="sideToggle" title="사이드바">&#9776;</button>
-    <div class="brand"><img class="brand-logo logo-glow" src="assets/logo-emblem.svg" alt=""><span>DARK <b>CODE</b></span> <span class="tag">CORE</span></div>
+    <div class="brand"><img class="brand-logo logo-glow" src="assets/dc-logo-64.png" alt=""><span>DARK <b>CODE</b></span> <span class="tag">CORE</span></div>
     <div class="pool-strip" id="poolStrip" title="무료 API 풀 상태 · 클릭해서 설정"></div>
     <div class="top-right">
       <span class="pill" id="freeUse">FREE --/--</span>
@@ -68,7 +69,7 @@
   <div class="panes">
     <!-- LEFT -->
     <aside class="side" id="side">
-      <div class="side-brand"><img class="logo-glow" src="assets/logo-emblem.svg" alt=""><div><b>DARK CODE</b><small id="sideUptime">NODE ONLINE · 00:00:00</small></div><span class="sys-dot"></span></div>
+      <div class="side-brand"><img class="logo-glow" src="assets/dc-logo-160.png" alt=""><div><b>DARK CODE</b><small id="sideUptime">NODE ONLINE · 00:00:00</small></div><span class="sys-dot"></span></div>
       <button class="new-btn" id="newBtn"><span>+</span> 새 작업 시작</button>
       <div class="side-search"><input id="threadSearch" placeholder="히스토리 검색" spellcheck="false"></div>
       <div class="side-label">작업 히스토리</div>
@@ -92,7 +93,7 @@
         <canvas class="dash-rain" id="dashRain"></canvas>
         <div class="dash-inner">
           <div class="dash-hero">
-            <img class="logo-glow hero-logo" src="assets/logo-emblem.svg" alt="">
+            <img class="logo-glow hero-logo" src="assets/dc-logo-512.webp" alt="">
             <div class="hero-txt"><h1>DARK <b>CODE</b><span class="blink">_</span></h1><p>SYSTEM ONLINE · 명령을 입력하면 멀티 AI가 실행합니다</p></div>
           </div>
           <div class="dash-chips" id="dashChips"></div>
@@ -101,6 +102,8 @@
             <div class="dp span2"><div class="dp-h"><b>SYSTEM TERMINAL</b><em class="live">LIVE</em></div><div class="term" id="dTerm"></div></div>
             <div class="dp"><div class="dp-h"><b>NETWORK STATISTICS</b><em id="netBadge">SIM</em></div><canvas class="cv-net" id="cNet"></canvas><div class="dp-f" id="netVals"></div></div>
             <div class="dp"><div class="dp-h"><b>SYSTEM RADAR</b><em class="live">SCAN</em></div><canvas class="cv-radar" id="cRadar"></canvas></div>
+            <div class="dp sec" id="secPanel"><div class="dp-h"><b>SECURITY ALERT</b><em class="live">GUARD</em></div><div class="sec-body" id="secBody"></div></div>
+            <div class="dp"><div class="dp-h"><b>STORAGE</b><em>LOCAL</em></div><div class="sto-list" id="stoBody"></div></div>
             <div class="dp"><div class="dp-h"><b>CPU USAGE</b><em id="cpuBadge"></em></div><div class="gauge-row"><canvas class="cv-gauge" id="cCpuG"></canvas><canvas class="cv-line" id="cCpuL"></canvas></div><div class="dp-f" id="cpuVals"></div></div>
             <div class="dp"><div class="dp-h"><b>MEMORY USAGE</b><em id="memBadge"></em></div><div class="gauge-row"><canvas class="cv-gauge" id="cMemG"></canvas><canvas class="cv-line" id="cMemL"></canvas></div><div class="dp-f" id="memVals"></div></div>
             <div class="dp span2"><div class="dp-h"><b>GLOBAL ACTIVITY</b><em class="live">REQ/s</em></div><canvas class="cv-act" id="cAct"></canvas><div class="dp-f" id="actVals"></div></div>
@@ -186,7 +189,7 @@
 </dialog>
 
 <div class="toast" id="toast"></div>
-<script src="assets/fx.js?v=20261122e"></script>
-<script type="module" src="assets/app.js?v=20261122e"></script>
+<script src="assets/fx.js?v=20261122f"></script>
+<script type="module" src="assets/app.js?v=20261122f"></script>
 </body>
 </html>
