@@ -888,7 +888,7 @@ function updateFoot() {
 function switchTab(tab) {
   state.rightTab = tab;
   $$('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  $('.rview').forEach((v) => v.classList.toggle('on', v.dataset.view === tab));
+  $$('.rview').forEach((v) => v.classList.toggle('on', v.dataset.view === tab));
   updateFoot();
   syncWaterfall();
 }
@@ -896,7 +896,7 @@ function rightVisible() { const app = $('#app'); return !app.hidden && (innerWid
 function syncWaterfall() { if (!waterfall) return; if (state.rightTab === 'stream' && rightVisible()) waterfall.start(); else waterfall.stop(); }
 function setCenterView(v) {
   state.centerView = v;
-  $('#cvTabs button').forEach((b) => b.classList.toggle('on', b.dataset.cv === v));
+  $$('#cvTabs button').forEach((b) => b.classList.toggle('on', b.dataset.cv === v));
   $('#dash').hidden = v !== 'dash'; $('#stream').hidden = v === 'dash';
   if (dashboard) { if (v === 'dash' && !$('#app').hidden) dashboard.start(); else dashboard.stop(); }
 }
@@ -1195,7 +1195,7 @@ function wire() {
   }
   $('#dashChips').innerHTML = WELCOME_CHIPS.map(([k, v]) => `<button data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('');
   $$('#dashChips button').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
-  $('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
+  $$('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate
   const clock = () => { $('#gateClock').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false }); };
   clock(); setInterval(clock, 1000);
