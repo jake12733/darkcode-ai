@@ -1120,7 +1120,7 @@ function collectSettings() {
 
 /* ================= AUTH (Firebase email/OAuth + local guest) ================= */
 let cloud = null;
-const loadCloud = () => (cloud ? Promise.resolve(cloud) : import('./cloud.js?v=20261122k').then((m) => (cloud = m)));
+const loadCloud = () => (cloud ? Promise.resolve(cloud) : import('./cloud.js?v=20261122l').then((m) => (cloud = m)));
 function getSession() { try { return JSON.parse(sessionStorage.getItem(NS + 'session') || 'null'); } catch { return null; } } // guest only
 function setSession(u) { sessionStorage.setItem(NS + 'session', JSON.stringify(u)); }
 function clearSession() { sessionStorage.removeItem(NS + 'session'); localStorage.removeItem(NS + 'session'); }

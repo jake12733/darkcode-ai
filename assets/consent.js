@@ -1,5 +1,5 @@
 /* DARK CODE · remote support consent page (target side) */
-import * as cloud from './cloud.js?v=20261122k';
+import * as cloud from './cloud.js?v=20261122l';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
