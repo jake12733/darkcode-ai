@@ -114,6 +114,8 @@ select.in{font:12px var(--mono);color:var(--g1)}
 .vtag.cap{right:10px;border:1px solid var(--neon);color:var(--neon)}
 .vp.viewonly .vtag.vo{display:block}
 .vp.captured .vtag.cap{display:block}
+.vtag.na{top:auto;bottom:10px;left:10px;border:1px solid var(--warn);color:var(--warn)}
+.vp.noagent .vtag.na{display:block}
 .meter{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;border-top:1px solid var(--line);font:11px var(--mono);color:var(--mut2)}
 .meter b{font-weight:600;color:#eafff1}
 .log{height:330px;overflow:auto;padding:8px 10px;font:11.5px/1.65 var(--mono);color:var(--mut)}
@@ -244,6 +246,7 @@ select.in{font:12px var(--mono);color:var(--g1)}
           <canvas class="fx" id="fx"></canvas>
           <span class="vtag vo">VIEW ONLY · 입력 차단</span>
           <span class="vtag cap">KEYBOARD CAPTURED · 바깥 클릭 시 해제</span>
+          <span class="vtag na">HOST AGENT 미연결 · 입력은 대상 PC에서 차단됨 (화면만 수신)</span>
           <div class="lock" id="lock"><div class="ico" id="lockIco"></div><h2 id="lockT">NO SESSION</h2><p id="lockD"></p></div>
         </div>
         <div class="meter"><span>FPS <b id="mFps">-</b></span><span>RES <b id="mRes">-</b></span><span>BITRATE <b id="mBr">-</b></span><span>RTT <b id="mRtt">-</b></span><span>INPUT RTT <b id="mIrtt">-</b></span><span>LOSS <b id="mLoss">-</b></span><span>CODEC <b id="mCodec">-</b></span></div>
@@ -500,6 +503,7 @@ function render() {
   const vp = $('#vp');
   vp.classList.toggle('live', conn);
   vp.classList.toggle('viewonly', conn && !canInput());
+  vp.classList.toggle('noagent', conn && canInput() && S.agent !== 'ready');
   if (!conn) vp.classList.remove('captured');
   renderLock(); renderWho();
 }

@@ -178,7 +178,6 @@ function renderAccepted() {
     evLine(paused ? '입력 제어 일시정지 · 모든 입력 차단' : '입력 제어 재개', paused ? 'warn' : '');
     updateAccepted();
   });
-  $('#agGo')?.addEventListener('click', () => agent.connect());
   $('#agCode')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') agent.connect(); });
   $('#btnEnd').onclick = async () => {
     $('#btnEnd').disabled = true;
