@@ -422,8 +422,8 @@ table.proc{width:100%;border-collapse:collapse;font:11px/1 var(--mono);table-lay
 }
 
 /* ===================== AUTH GATE + INTEGRATIONS + REMOTE ===================== */
-.gate-video{opacity:.5}
-.gate-stream{position:absolute;inset:0;width:100%;height:100%;opacity:.3;pointer-events:none;z-index:1}
+.gate-video{opacity:.4}
+.gate-stream{position:absolute;inset:0;width:100%;height:100%;opacity:.34;pointer-events:none;z-index:1}
 .gate-overlay{z-index:1}
 .gate-scan{z-index:2}
 .gate{overflow-y:auto;place-items:safe center;padding:52px 0 44px}

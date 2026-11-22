@@ -1167,7 +1167,7 @@ function showVerify(u, msg) {
 function userFromFirebase(u) { return { id: u.uid, name: u.displayName || (u.email || 'operator').split('@')[0], email: u.email || '', guest: false, provider: u.providerData[0]?.providerId || 'password' }; }
 let gateStream = null;
 async function bootTo(u, quick) {
-  user = u;
+  user = u; $('#loginErr').textContent = '';
   if (!quick) {
     const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
     let info = null; if (!u.guest && cloud) { try { info = await cloud.sessionInfo(); } catch {} }
@@ -1342,6 +1342,7 @@ async function disconnectInteg(svc, card) {
 }
 
 /* ================= REMOTE SUPPORT (requester side, consent-based) ================= */
+const hms = (t) => { const d = new Date(t); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
 const REMOTE_TASKS = [['diagnose', '시스템 진단'], ['cleanup', '임시/불필요 파일 정리'], ['optimize', '성능 최적화']];
 let remote = { sid: null, unsub: null, data: null, tick: null };
 function openRemote() { $('#remote').showModal(); renderRemote(); }
@@ -1366,7 +1367,7 @@ function renderRemote() {
       <div class="rm-row"><span>SESSION</span><code>${remote.sid.slice(0, 4)}-${remote.sid.slice(4, 8)}-${remote.sid.slice(-4)}</code></div>
       <div class="rm-link"><input readonly value="${consentUrl(remote.sid)}"><button class="btn-sm" id="rmCopy">복사</button><a class="btn-sm" href="${consentUrl(remote.sid)}" target="_blank" rel="noopener">열기</a></div>
       ${d.status === 'accepted' && d.target ? `<div class="rm-env">${Object.entries(d.target).map(([k, v]) => `<span>${esc(k)} <b>${esc(v ?? '-')}</b></span>`).join('')}</div>` : ''}
-      ${d.status === 'accepted' ? `<div class="rm-log" id="rmLog">${(d.log || []).slice(-30).map((l) => `<div>${new Date(l.t).toLocaleTimeString('ko-KR', { hour12: false })} ${esc(l.msg)}</div>`).join('') || '<div>대상자 화면에 표시할 안내 메시지를 보내세요.</div>'}</div>
+      ${d.status === 'accepted' ? `<div class="rm-log" id="rmLog">${(d.log || []).slice(-30).map((l) => `<div>${hms(l.t)} ${esc(l.msg)}</div>`).join('') || '<div>대상자 화면에 표시할 안내 메시지를 보내세요.</div>'}</div>
         <div class="rm-send"><input id="rmMsg" maxlength="240" placeholder="대상자에게 보낼 안내 (예: AnyDesk 주소를 알려주세요)"><button class="btn-sm" id="rmSend">전송</button></div>` : ''}
       <div class="rm-btns">${d.status === 'pending' ? '<button class="btn-sm" id="rmCancel">요청 취소</button>' : ''}${d.status === 'accepted' ? '<button class="btn-sm" id="rmEnd">세션 종료</button>' : ''}</div>
     </div>` : ''}`;

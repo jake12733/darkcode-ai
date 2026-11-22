@@ -98,6 +98,7 @@ export async function expireRemote(sid) { await init(); await F.updateDoc(F.doc(
 export async function endRemote(sid, by) { await init(); await F.updateDoc(F.doc(db, 'remoteSessions', sid), { status: by === 'target' ? 'ended' : 'ended', endedAt: F.serverTimestamp(), endedBy: by }); }
 export async function cancelRemote(sid) { await init(); await F.updateDoc(F.doc(db, 'remoteSessions', sid), { status: 'cancelled', endedAt: F.serverTimestamp(), endedBy: 'requester' }); }
 export async function logRemote(sid, msg) { await init(); await F.updateDoc(F.doc(db, 'remoteSessions', sid), { log: F.arrayUnion({ t: Date.now(), msg: String(msg).slice(0, 240) }) }); }
+export async function deleteRemote(sid) { await init(); await F.deleteDoc(F.doc(db, 'remoteSessions', sid)); }
 export async function listMyRemotes() {
   await init(); const u = auth.currentUser; if (!u) return [];
   const q = F.query(F.collection(db, 'remoteSessions'), F.where('requesterUid', '==', u.uid), F.limit(20));

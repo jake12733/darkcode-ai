@@ -69,7 +69,7 @@ function render() {
     st.innerHTML = `
       <div class="big ok">ACCESS GRANTED</div>
       <p class="sub">연결 승인 완료 · 원격 지원/최적화 세션이 활성화되었습니다.<br>요청자 화면에도 승인 상태가 실시간으로 표시됩니다.</p>
-      <div class="log" id="log">${log.length ? log.map((l) => `<div><span style="color:var(--mut2)">${new Date(l.t).toLocaleTimeString('ko-KR', { hour12: false })}</span> ${esc(l.msg)}</div>`).join('') : '<div>요청자의 안내 메시지를 기다리는 중…</div>'}</div>
+      <div class="log" id="log">${log.length ? log.map((l) => `<div><span style="color:var(--mut2)">${[new Date(l.t).getHours(), new Date(l.t).getMinutes(), new Date(l.t).getSeconds()].map(pad).join(':')}</span> ${esc(l.msg)}</div>`).join('') : '<div>요청자의 안내 메시지를 기다리는 중…</div>'}</div>
       <button class="btn-end" id="btnEnd">세션 종료 (END SESSION)</button>`;
     const lg = $('#log'); lg.scrollTop = lg.scrollHeight;
     $('#btnEnd').onclick = async () => { $('#btnEnd').disabled = true; try { await cloud.endRemote(sid, 'target'); } catch (e) { alert('종료 실패: ' + e.message); $('#btnEnd').disabled = false; } };
