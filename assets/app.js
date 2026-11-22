@@ -1197,7 +1197,7 @@ function wire() {
   $$('#dashChips button').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
   $$('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate
-  const clock = () => { $('#gateClock').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false }); };
+  const clock = () => { const d = new Date(); $('#gateClock').textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
   clock(); setInterval(clock, 1000);
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();

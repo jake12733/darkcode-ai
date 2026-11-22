@@ -353,11 +353,11 @@ details.runlog .logbox{max-height:260px}
 .hero-txt h1 b{color:var(--neon);text-shadow:0 0 18px rgba(0,255,102,.6)}
 .hero-txt p{margin:7px 0 0;font:11px var(--mono);letter-spacing:.08em;color:var(--g2)}
 .blink{color:var(--neon);animation:blink 1s steps(1) infinite}
-.dash-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.dash-chips button{padding:7px 11px;border:1px solid var(--line2);border-radius:8px;background:rgba(0,10,4,.75);color:var(--txt);font-size:12.5px;text-align:left;max-width:100%;transition:.2s}
+.dash-chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:12px}
+.dash-chips button{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 11px;border:1px solid var(--line2);border-radius:8px;background:rgba(0,10,4,.75);color:var(--txt);font-size:12.5px;text-align:left;max-width:100%;transition:.2s}
 .dash-chips button small{font:700 9.5px var(--mono);letter-spacing:.12em;color:var(--g2);margin-right:6px}
 .dash-chips button:hover{border-color:var(--neon);box-shadow:0 0 14px rgba(0,255,102,.2)}
-.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin-bottom:12px}
 .kpi{padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:rgba(0,8,3,.8)}
 .kpi small{display:block;font:600 9px/1 var(--mono);letter-spacing:.14em;color:var(--mut2)}
 .kpi b{display:block;margin-top:6px;font:700 15px/1 var(--mono);color:var(--neon);text-shadow:0 0 10px rgba(0,255,102,.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -409,10 +409,9 @@ table.proc{width:100%;border-collapse:collapse;font:11px/1 var(--mono);table-lay
 .wf-scan::after{content:"";position:absolute;left:0;right:0;height:120px;top:-120px;background:linear-gradient(180deg,transparent,rgba(0,255,102,.07),transparent);animation:scanMove 4.5s linear infinite}
 @keyframes scanMove{to{top:100%}}
 
-@media (max-width:1180px){ .kpis{grid-template-columns:repeat(3,minmax(0,1fr))} }
+
 @media (max-width:760px){
   .dgrid{grid-template-columns:1fr}
-  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cv-tabs button{padding:5px 7px;font-size:9.5px;letter-spacing:.06em}
   .center-head .thread-title{display:none}
   .hero-txt h1{font-size:21px}
