@@ -9,6 +9,7 @@
 :root{--bg:#050706;--bg2:#0a0e0c;--card:#0d1210;--line:#1a2420;--line2:#26342e;--txt:#e9efe9;--mut:#93a39a;--mut2:#5f6f66;--neon:#00FF66;--g1:#22C55E;--g2:#16A34A;--warn:#facc15;--err:#ff5470;--r:14px;
 --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
 img{max-width:100%;display:block}
@@ -21,7 +22,7 @@ a{color:inherit}
 h2.sec{margin:10px 0 8px;font-size:clamp(26px,4vw,40px);letter-spacing:-.02em;line-height:1.2}
 .lead{margin:0 0 28px;color:var(--mut);max-width:620px}
 section{padding:96px 0;scroll-margin-top:68px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 20px;border-radius:999px;border:1px solid var(--line2);background:transparent;font-weight:600;font-size:14px;transition:.2s;white-space:nowrap}
+.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 20px;border-radius:999px;border:1px solid var(--line2);background:transparent;font-weight:600;font-size:14px;transition:.2s;white-space:nowrap}
 .btn:hover{border-color:var(--neon);color:var(--neon)}
 .btn.pri{background:var(--neon);border-color:var(--neon);color:#002410}
 .btn.pri:hover{box-shadow:0 0 26px rgba(0,255,102,.45);color:#002410}
@@ -79,9 +80,9 @@ section{padding:96px 0;scroll-margin-top:68px}
 .drop .grow{flex:1;min-width:0}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .card{position:relative;border-radius:var(--r);overflow:hidden;background:var(--card);border:1px solid var(--line);cursor:zoom-in;aspect-ratio:4/5;animation:cardIn .5s ease both}
-.card.wide{aspect-ratio:auto;grid-column:span 2}
+.card.wide{aspect-ratio:8/5;grid-column:span 2}
 @keyframes cardIn{from{opacity:0;transform:translateY(10px)}}
-.card img{width:100%;height:100%;object-fit:cover;transition:transform .6s ease}
+.card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .6s ease}
 .card:hover img{transform:scale(1.05)}
 .card .meta{position:absolute;inset:auto 0 0;padding:40px 14px 12px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.82));display:flex;align-items:flex-end;gap:8px}
 .card .meta b{display:block;font-size:15px;line-height:1.3}
@@ -176,7 +177,7 @@ section{padding:96px 0;scroll-margin-top:68px}
 .sm span{padding:6px 11px;border-radius:999px;border:1px solid var(--line2);font:700 11px var(--mono);letter-spacing:.06em;color:var(--mut2);transition:.3s}
 .sm span.on{border-color:var(--neon);color:#002410;background:var(--neon);box-shadow:0 0 18px rgba(0,255,102,.35)}
 .sm span.past{border-color:rgba(0,255,102,.4);color:var(--g1)}
-.sm span.term.on{background:var(--err);border-color:var(--err);color:#1a0006;box-shadow:0 0 18px rgba(255,84,112,.35)}
+.sm span.sm-term.on{background:var(--err);border-color:var(--err);color:#1a0006;box-shadow:0 0 18px rgba(255,84,112,.35)}
 .rm-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .code-box{display:flex;align-items:center;gap:10px;margin:12px 0;padding:12px 14px;border-radius:12px;border:1px solid var(--line2);background:var(--bg);font:700 18px var(--mono);letter-spacing:.2em}
 .code-box small{font:500 11px var(--mono);letter-spacing:.08em;color:var(--mut2)}
@@ -346,7 +347,7 @@ footer .links{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
       <p class="lead reveal">고객이 수락 화면에서 <b>직접 수락(ACCEPT)</b>해야만 세션이 연결됩니다. 거절·만료·종료 시 즉시 해제되고 기록이 저장됩니다.</p>
       <div class="rm-grid">
         <div class="panel">
-          <div class="sm" id="sm"><span data-s="IDLE">IDLE</span><span data-s="PENDING">PENDING</span><span data-s="ACCEPTED">ACCEPTED</span><span data-s="CONNECTED">CONNECTED</span><span data-s="TERMINATED" class="term">TERMINATED</span></div>
+          <div class="sm" id="sm"><span data-s="IDLE">IDLE</span><span data-s="PENDING">PENDING</span><span data-s="ACCEPTED">ACCEPTED</span><span data-s="CONNECTED">CONNECTED</span><span data-s="TERMINATED" class="sm-term">TERMINATED</span></div>
           <div class="fld"><label for="rmWho">고객 이름 / 메모</label><input id="rmWho" maxlength="40" placeholder="예: 김OO 고객 · 보정 컨펌"></div>
           <div class="code-box" id="codeBox" hidden><small>SESSION</small><span id="rmCode">----</span><span class="tm" id="rmTimer">--:--</span></div>
           <div class="rm-row">
@@ -384,7 +385,7 @@ footer .links{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
 
 <div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="사진 크게 보기">
   <div class="lb-inner">
-    <div class="lb-stage"><button class="lb-close" id="lbClose" aria-label="닫기">✕</button><button class="lb-nav lb-prev" id="lbPrev" aria-label="이전">‹</button><img id="lbImg" alt=""><button class="lb-nav lb-next" id="lbNext" aria-label="다음">›</button></div>
+    <div class="lb-stage"><button class="lb-close" id="lbClose" aria-label="닫기">✕</button><button class="lb-nav lb-prev" id="lbPrev" aria-label="이전">‹</button><img id="lbImg" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><button class="lb-nav lb-next" id="lbNext" aria-label="다음">›</button></div>
     <aside class="lb-side">
       <span class="lb-count" id="lbCount"></span>
       <h3 id="lbTitle"></h3>
@@ -437,7 +438,7 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = Math.imul(s ^ (
 function grain(x, w, h, r, amt) { const img = x.getImageData(0, 0, w, h); const d = img.data; for (let i = 0; i < d.length; i += 4) { const n = (r() - 0.5) * amt; d[i] += n; d[i + 1] += n; d[i + 2] += n; } x.putImageData(img, 0, 0); }
 function vignette(x, w, h, a) { const g = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.75); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${a})`); x.fillStyle = g; x.fillRect(0, 0, w, h); }
 function figure(x, cx, base, s, fill) { x.fillStyle = fill; x.beginPath(); x.ellipse(cx, base - s * 1.55, s * 0.32, s * 0.4, 0, 0, Math.PI * 2); x.fill(); x.beginPath(); x.moveTo(cx - s * 0.18, base - s * 1.2); x.quadraticCurveTo(cx - s * 0.95, base - s * 1.05, cx - s * 1.1, base); x.lineTo(cx + s * 1.1, base); x.quadraticCurveTo(cx + s * 0.95, base - s * 1.05, cx + s * 0.18, base - s * 1.2); x.closePath(); x.fill(); }
-function rim(x, cx, base, s, col) { x.save(); x.strokeStyle = col; x.lineWidth = s * 0.03; x.shadowColor = col; x.shadowBlur = s * 0.25; x.beginPath(); x.ellipse(cx, base - s * 1.55, s * 0.32, s * 0.4, 0, -Math.PI * 0.95, -Math.PI * 0.05); x.stroke(); x.beginPath(); x.moveTo(cx + s * 0.18, base - s * 1.2); x.quadraticCurveTo(cx + s * 0.95, base - s * 1.05, cx + s * 1.1, base); x.stroke(); x.restore(); }
+function rim(x, cx, base, s, col) { x.save(); x.globalAlpha = 0.8; x.strokeStyle = col; x.lineWidth = s * 0.012; x.shadowColor = col; x.shadowBlur = s * 0.12; x.beginPath(); x.ellipse(cx, base - s * 1.55, s * 0.32, s * 0.4, 0, -Math.PI * 0.95, -Math.PI * 0.05); x.stroke(); x.beginPath(); x.moveTo(cx + s * 0.18, base - s * 1.2); x.quadraticCurveTo(cx + s * 0.95, base - s * 1.05, cx + s * 1.1, base); x.stroke(); x.restore(); }
 const PAINTERS = {
   night(x, w, h, r, v) {
     const hue = [150, 200, 320, 30][v % 4];
