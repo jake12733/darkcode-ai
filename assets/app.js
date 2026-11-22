@@ -28,7 +28,7 @@ const FIREBASE = {
   sdk: '13.4.0',
 };
 const FREE_DAILY_CAP = 80;
-const DEFAULT_OPTS = { ttl: 86400, compressAt: 6000, keepRecent: 4, firstByteTimeout: 30000, idleTimeout: 45000, cooldown429: 60, synthWithClaude: true };
+const DEFAULT_OPTS = { ttl: 86400, compressAt: 6000, keepRecent: 4, firstByteTimeout: 30000, idleTimeout: 45000, cooldown429: 60, gateA: true, gateC: true, claudeMonthlyCap: 200000, claudeMaxOut: 6000 };
 
 const PROVIDER_DEFS = [
   { id: 'gemini-free', name: 'Gemini Free', short: 'GEM·FREE', kind: 'firebase', model: 'gemini-3.5-flash-lite', weight: 5, roles: ['general', 'multimodal', 'long', 'plan', 'code', 'verify', 'summary', 'synth'], builtin: true, note: '내장 무료 (Firebase AI Logic) · 키 불필요' },
@@ -88,6 +88,12 @@ function provState(p) {
 function freeUse() { const u = LS.get('free', {}); return u.d === today() ? u.n : 0; }
 function bumpFree() { LS.set('free', { d: today(), n: freeUse() + 1 }); renderFree(); }
 function renderFree() { $('#freeUse').textContent = `FREE ${freeUse()}/${FREE_DAILY_CAP}`; }
+
+/* ================= CLAUDE METER (Zero-Claude) ================= */
+const month = () => new Date().toISOString().slice(0, 7);
+function claudeUse() { const u = LS.get('claude', {}); return u.m === month() ? u : { m: month(), in: 0, out: 0, cr: 0, cw: 0, calls: 0 }; }
+function recordClaude(u) { const c = claudeUse(); c.in += u.in; c.out += u.out; c.cr += u.cr; c.cw += u.cw; c.calls += 1; LS.set('claude', c); }
+const claudeReady = () => usable(prov.claude);
 
 /* ================= ERRORS ================= */
 class ProvError extends Error { constructor(status, msg, kind) { super(msg); this.status = status; this.kind = kind || 'http'; } }
@@ -198,10 +204,21 @@ async function callProvider(p, { system, messages, onToken, signal, maxTokens = 
     return streamParse(res, ctl, (j) => j.choices?.[0]?.delta?.content || '', onToken);
   }
   if (p.kind === 'anthropic') {
+    const cu = claudeUse();
+    if (opts.claudeMonthlyCap > 0 && cu.in + cu.out >= opts.claudeMonthlyCap) throw new ProvError(429, `Claude 월 토큰 상한(${opts.claudeMonthlyCap.toLocaleString()}) 도달`, 'quota');
     const headers = { 'Content-Type': 'application/json', 'x-api-key': p.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
-    const { res, ctl } = await fetchWithTimeout('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: messages.map((m) => ({ role: m.role, content: m.content })), stream: true }) }, signal);
+    // system prompt split out as a Prompt Caching block (ephemeral); only snapshot + problem section go in messages
+    const sys = system ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : undefined;
+    const usage = { in: 0, out: 0, cr: 0, cw: 0 };
+    const { res, ctl } = await fetchWithTimeout('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, opts.claudeMaxOut), system: sys, messages: messages.map((m) => ({ role: m.role, content: m.content })), stream: true }) }, signal);
     if (!res.ok) throw await readError(res);
-    return streamParse(res, ctl, (j) => (j.type === 'content_block_delta' ? j.delta?.text || '' : ''), onToken);
+    const text = await streamParse(res, ctl, (j) => {
+      if (j.type === 'message_start') { const u = j.message?.usage || {}; usage.in = u.input_tokens || 0; usage.cr = u.cache_read_input_tokens || 0; usage.cw = u.cache_creation_input_tokens || 0; }
+      else if (j.type === 'message_delta') usage.out = j.usage?.output_tokens || usage.out;
+      return j.type === 'content_block_delta' ? j.delta?.text || '' : '';
+    }, onToken);
+    recordClaude(usage); p.lastUsage = usage;
+    return text;
   }
   if (p.kind === 'cohere') {
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key}` };
@@ -246,7 +263,7 @@ function pickProvider(role, { exclude = new Set(), avoid = [], override } = {}) 
 
 const ROLE_MODEL_LOCAL = { code: 'model', general: 'model', synth: 'model', plan: 'fastModel', summary: 'fastModel', verify: 'model', fast: 'fastModel' };
 
-async function routeCall({ role, system, messages, onToken, signal, log, avoid = [], prefer, maxTokens, temperature, label }) {
+async function routeCall({ role, system, messages, onToken, signal, log, avoid = [], prefer, maxTokens, temperature, label, claudeOnly }) {
   const exclude = new Set();
   const override = state.route;
   const tryOne = async (p, modelOverride) => {
@@ -258,12 +275,14 @@ async function routeCall({ role, system, messages, onToken, signal, log, avoid =
     if (!text.trim()) throw new ProvError(502, '빈 응답');
     const ms = performance.now() - t0; markOk(p, ms);
     log(`done   ${p.short} ${Math.round(ms)}ms · ~${estTok(text)} tok`, 'ok');
+    if (p.kind === 'anthropic' && p.lastUsage) { const u = p.lastUsage; log(`claude usage in=${u.in} (cache read ${u.cr} · write ${u.cw}) out=${u.out}`, 'warn'); }
     return { text, provider: p, model };
   };
   // explicit preference (e.g. Claude for synthesis)
   if (prefer && prov[prefer] && usable(prov[prefer])) {
-    try { return await tryOne(prov[prefer]); } catch (e) { if (e.kind === 'abort') throw e; markFail(prov[prefer], e); log(`fail   ${prov[prefer].short} ${e.status || e.kind} ${e.message} → 무료 풀로 failover`, 'warn'); exclude.add(prefer); }
+    try { return await tryOne(prov[prefer]); } catch (e) { if (e.kind === 'abort' || claudeOnly) { if (claudeOnly && e.kind !== 'abort') markFail(prov[prefer], e); throw e; } markFail(prov[prefer], e); log(`fail   ${prov[prefer].short} ${e.status || e.kind} ${e.message} → 무료 풀로 failover`, 'warn'); exclude.add(prefer); }
   }
+  if (claudeOnly) throw new ProvError(503, 'Claude 사용 불가', 'exhausted');
   // free pool round robin
   for (let guard = 0; guard < 12; guard++) {
     const p = pickProvider(role, { exclude, avoid, override });
@@ -286,10 +305,7 @@ async function routeCall({ role, system, messages, onToken, signal, log, avoid =
   } else {
     log('fallback 로컬 Ollama 비활성 (설정에서 켜면 무제한 폴백)', 't');
   }
-  // last resort: Claude if it exists and wasn't tried
-  if (!exclude.has('claude') && prov.claude && usable(prov.claude) && role !== 'synth') {
-    try { return await tryOne(prov.claude); } catch (e) { if (e.kind === 'abort') throw e; markFail(prov.claude, e); }
-  }
+  // Zero-Claude: never fall back to paid Claude implicitly; only the escalation gate may call it.
   throw new ProvError(503, '사용 가능한 프로바이더가 없습니다 (모두 쿨다운/실패). 설정에서 키를 추가하거나 잠시 후 다시 시도하세요.', 'exhausted');
 }
 
@@ -338,6 +354,8 @@ const ROLE_PROMPTS = {
   strategist: `당신은 [전략가]입니다. 사용자의 요청을 달성할 최단 경로와 설계를 한국어 bullet 8줄 이내로 제시하십시오: 목표 해석, 산출물 구조(파일/섹션), 기술·디자인 선택, 기본값 가정, 위험 요소. 코드는 쓰지 마십시오.`,
   implementer: `당신은 [구현자]입니다. 주어진 전략에 따라 실제 산출물 초안을 완성하십시오. 코드는 생략 없이 완성본으로, 웹 UI라면 단일 html 코드 블록(내장 CSS/JS)으로 작성합니다. 설명은 최소화하십시오.`,
   critic: `당신은 [비판가]입니다. 초안의 오류, 누락, 보안·API 한도·브라우저 호환성·반응형·접근성 함정을 최대 8개 bullet로 지적하고 각각 구체적 수정안을 붙이십시오. 치명적 문제가 없으면 "치명적 문제 없음"과 개선점 2개만 쓰십시오.`,
+  verifier: `당신은 [교차 검증자]입니다. 최종안을 사용자 요청과 대조해 논리적 모순과 치명적 코드 오류(실행 불가, 문법 오류, 잘린 코드, 필수 기능 누락, 존재하지 않는 함수/변수 참조)만 판정하십시오. 스타일·사소한 개선점은 무시합니다.
+첫 줄에 정확히 "VERDICT: PASS" 또는 "VERDICT: FAIL" 을 쓰고, FAIL이면 문제를 위치와 함께 최대 5개 bullet로 쓰십시오.`,
   summarizer: `다음 대화 기록을 아래 4개 섹션으로 압축하십시오. 코드 전문은 넣지 말고 파일명·핵심 결정만. 600 토큰 이내.
 [완료된 단계]
 [현재 산출물]
@@ -467,8 +485,8 @@ function guessName(lang, i, used) {
 }
 
 /* ================= ORCHESTRATION ================= */
-const STAGES_COUNCIL = ['CACHE', 'CONTEXT', 'STRATEGIST', 'IMPLEMENTER', 'CRITIC', 'SYNTH', 'RENDER'];
-const STAGES_FAST = ['CACHE', 'CONTEXT', 'ROUTE', 'GENERATE', 'RENDER'];
+const STAGES_COUNCIL = ['CACHE', 'CONTEXT', 'STRATEGIST', 'IMPLEMENTER', 'CRITIC', 'SYNTH', 'VERIFY', 'GATE', 'RENDER'];
+const STAGES_FAST = ['CACHE', 'CONTEXT', 'ROUTE', 'GENERATE', 'VERIFY', 'GATE', 'RENDER'];
 const STAGES_IMAGE = ['CACHE', 'PROMPT', 'IMAGE', 'RENDER'];
 
 async function buildContext(thread, run) {
@@ -511,18 +529,22 @@ function routeSummary(run) {
   if (free.length) path.push(`무료 풀 순환 (${[...new Set(free.map((c) => c.short))].join(' → ')})`);
   if (run.calls.some((c) => c.pid === 'ollama')) path.push('로컬 Ollama 폴백');
   const synth = run.calls.find((c) => c.label === 'synth');
-  if (synth) path.push(synth.pid === 'claude' ? 'Claude 최종 통합' : `최종 통합 (Claude 키 없음/불가 → ${synth.short} 대체)`);
+  if (synth) path.push(`최종 통합 ${synth.short}`);
+  const escn = run.escalation;
+  if (escn?.used) { const u = escn.usage || {}; path.push(`Claude 승격 (${escn.reason}) · in ${u.in || 0} (cache read ${u.cr || 0}) / out ${u.out || 0} tok`); }
+  else if (escn) path.push(`승격 조건 (${escn.reason}) 충족했으나 Claude 미사용 → Zero-Claude`);
+  else if (!run.cacheHit) path.push('Zero-Claude (Claude 0 tok)');
   if (run.failovers) path.push(`failover ${run.failovers}회`);
   return { path: path.join(' → '), used };
 }
 
 function composeAnswer(run, sec, snapshotYaml) {
-  const logLines = run.lines.filter((l) => /route|done|fail|fallback|cache|ctx|stage|image/.test(l)).slice(-22);
+  const logLines = run.lines.filter((l) => /route|done|fail|fallback|cache|ctx|stage|image|gate|verify|repair|claude/.test(l)).slice(-22);
   const rs = routeSummary(run);
   let md = `## [실시간 실행 로그 / 코드 스트림 요약]\n\`\`\`log\n${logLines.join('\n')}\n\`\`\`\n\n`;
   md += `## [라우팅 및 합의 요약]\n- **실행 경로**: ${rs.path}\n`;
   if (rs.used.length) md += `- **호출**: ${rs.used.join(' · ')}\n`;
-  md += `- **소요**: ${(run.ms / 1000).toFixed(1)}s · 모드 ${run.mode === 'council' ? '멀티 AI 상의' : run.mode === 'image' ? '이미지 파이프라인' : '빠른 실행'}\n`;
+  md += `- **소요**: ${(run.ms / 1000).toFixed(1)}s · 모드 ${({ council: '멀티 AI 상의', claude: 'Claude Final Pass', image: '이미지 파이프라인', fast: '빠른 실행' })[run.mode]}\n`;
   if (sec.consensus) md += `\n${sec.consensus}\n`;
   md += `\n## [자율 실행 산출물]\n${sec.deliverable || '(산출물 없음)'}\n\n`;
   md += `## [세션 상태 스냅샷 (State Snapshot)]\n\`\`\`yaml\n${snapshotYaml}\n\`\`\`\n`;
@@ -563,7 +585,7 @@ async function execute(prompt, { noCache = false } = {}) {
         run.stage('CONTEXT');
         const ctx = await buildContext({ ...thread, messages: thread.messages.slice(0, -1) }, run);
         if (ctx.compressed) { run.compressed = true; const real = curThread(); if (real) real.summary = thread.summary; }
-        modelText = mode === 'council' ? await runCouncil(prompt, ctx.messages, run) : await runFast(prompt, ctx.messages, run);
+        modelText = mode === 'fast' ? await runFast(prompt, ctx.messages, run, thread) : await runCouncil(prompt, ctx.messages, run, thread, mode === 'claude');
       }
       cachePut(key, { modelText, calls: run.calls });
       run.log(`cache  store key=${key}`, 't');
@@ -595,34 +617,141 @@ async function execute(prompt, { noCache = false } = {}) {
   }
 }
 
-async function runFast(prompt, history, run) {
-  run.stage('ROUTE');
-  run.log('stage  단일 경로 · 범용 역할로 가중치 라운드 로빈 선택', 'k');
-  run.stage('GENERATE');
-  const r = await callTracked(run, { role: 'general', label: 'generate', system: SYSTEM_CORE, messages: [...history, { role: 'user', content: prompt }] });
-  return r.text;
+/* ---------- Zero-Claude escalation gate ---------- */
+const ARCH_RE = /(아키텍처|architecture|시스템\s*설계|전체\s*(시스템\s*)?구조|마이크로\s*서비스|\bMSA\b|인프라\s*설계|플랫폼\s*설계|대규모|멀티\s*테넌트|분산\s*시스템|system\s*design|백엔드\s*설계|서비스\s*구조\s*설계)/i;
+function archGate(prompt, thread) { return opts.gateC && !thread?.archConfirmed && ARCH_RE.test(prompt); }
+
+// Deterministic, zero-token code check (compile only, never executes)
+function staticCheck(md) {
+  const issues = [];
+  const tryCompile = (code, where) => {
+    if (/^\s*(import|export)\s/m.test(code)) return; // ES modules can't be compiled with Function()
+    try { new Function(code); } catch (e) { issues.push(`${where}: ${e.name}: ${e.message}`); }
+  };
+  extractCode(md).forEach((c, i) => {
+    if (['javascript', 'js'].includes(c.lang)) tryCompile(c.code, `code#${i + 1} (js)`);
+    else if (c.lang === 'json') { try { JSON.parse(c.code); } catch (e) { issues.push(`code#${i + 1} (json): ${e.message}`); } }
+    else if (c.lang === 'html') {
+      if (/<!doctype html|<html[\s>]/i.test(c.code) && !/<\/html>\s*$/i.test(c.code.trim())) issues.push(`code#${i + 1} (html): 문서가 잘림 (</html> 없음)`);
+      const re = /<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi; let m; let k = 0;
+      while ((m = re.exec(c.code))) { k++; const attrs = m[1] || ''; if (/type=["']?(module|application\/ld\+json|text\/(template|x-|babel))/i.test(attrs)) continue; tryCompile(m[2], `code#${i + 1} (html <script> ${k})`); }
+    }
+  });
+  return issues;
+}
+function latestSnapshot(thread) { return [...(thread?.messages || [])].reverse().find((m) => m.snapshot)?.snapshot || ''; }
+// Minimal Claude payload: State Snapshot + compressed context + key problem section only (never the full chat log)
+function claudePayload(prompt, thread, sections) {
+  let c = `[State Snapshot]\n${latestSnapshot(thread) || '(첫 요청 · 이전 상태 없음)'}\n`;
+  if (thread?.summary?.text) c += `\n[압축 컨텍스트]\n${thread.summary.text.slice(0, 2000)}\n`;
+  c += `\n[사용자 요청]\n${prompt}\n`;
+  for (const [k, v] of sections) if (v) c += `\n[${k}]\n${v}\n`;
+  return [{ role: 'user', content: c }];
+}
+const codeSection = (md, limit = 20000) => { const cs = extractCode(md); return (cs.length ? cs.map((c) => '```' + c.lang + '\n' + c.code + '\n```').join('\n\n') : md).slice(0, limit); };
+
+async function escalateToClaude(run, reason, prompt, thread, sections, instruction) {
+  const labels = { a: '(a) 무료 교차 검증 미해결', b: '(b) Claude Final Pass 모드', c: '(c) 대규모 아키텍처 첫 설계 확정' };
+  if (!claudeReady()) {
+    run.log(`gate   승격 조건 ${labels[reason]} 충족 · Claude 키 없음/불가 → Zero-Claude 유지 (무료 결과 사용)`, 'warn');
+    run.escalation = { reason, used: false };
+    return null;
+  }
+  const messages = claudePayload(prompt, thread, sections.concat([['지시', instruction]]));
+  const payTok = estTok(messages[0].content);
+  run.log(`gate   ESCALATE ${labels[reason]} → Claude · payload ~${payTok} tok (스냅샷+문제 구간만, 전체 대화 미전달) · system=prompt-cache`, 'warn');
+  try {
+    const r = await callTracked(run, { role: 'synth', label: `claude-${reason}`, prefer: 'claude', system: SYSTEM_CORE, messages, maxTokens: opts.claudeMaxOut, temperature: 0.3, claudeOnly: true });
+    run.escalation = { reason, used: r.provider.id === 'claude', usage: prov.claude.lastUsage };
+    if (r.provider.id !== 'claude') return null;
+    return r.text;
+  } catch (e) {
+    if (e.kind === 'abort') throw e;
+    run.log(`gate   Claude 호출 실패 → 무료 결과 유지 (${e.message})`, 'warn');
+    run.escalation = { reason, used: false };
+    return null;
+  }
 }
 
-async function runCouncil(prompt, history, run) {
+// free cross-verification + one free repair round; returns {text, unresolved, issues}
+async function verifyLoop(run, prompt, text, { llm = true, avoid = [] } = {}) {
+  let cur = text; let issues = [];
+  for (let round = 0; round < 2; round++) {
+    issues = staticCheck(cur);
+    run.log(issues.length ? `verify static ${issues.length}건: ${issues.slice(0, 2).join(' | ')}` : 'verify static PASS (JS/JSON/HTML 컴파일 검사 · 0 tok)', issues.length ? 'warn' : 'ok');
+    if (llm) {
+      try {
+        const v = await callTracked(run, { role: 'verify', label: round ? 're-verify' : 'verify', system: ROLE_PROMPTS.verifier, avoid, messages: [{ role: 'user', content: `요청:\n${prompt}\n\n[최종안]\n${cur.slice(0, 24000)}${issues.length ? `\n\n[정적 검사 오류]\n${issues.join('\n')}` : ''}` }], maxTokens: 600, temperature: 0.1 });
+        if (/VERDICT:\s*FAIL/i.test(v.text)) { issues.push(...v.text.replace(/^.*VERDICT:\s*FAIL.*$/im, '').trim().split('\n').filter((l) => l.trim()).slice(0, 5)); run.log('verify cross-check FAIL', 'warn'); }
+        else run.log(/VERDICT:\s*PASS/i.test(v.text) ? 'verify cross-check PASS' : 'verify 판정 형식 불명 → PASS 처리 (승격 안 함)', 'ok');
+      } catch (e) { if (e.kind === 'abort') throw e; run.log('verify 검증 모델 없음 → 정적 검사 결과만 사용', 't'); }
+    }
+    if (!issues.length) return { text: cur, unresolved: false, issues };
+    if (round === 1) break;
+    run.log('repair 무료 모델로 1회 수정 시도', 'k');
+    try {
+      const fx = await callTracked(run, { role: 'code', label: 'repair', system: SYSTEM_CORE, avoid, messages: [{ role: 'user', content: `요청:\n${prompt}\n\n[현재 최종안]\n${cur.slice(0, 26000)}\n\n[검증 문제]\n${issues.join('\n')}\n\n문제만 정확히 고친 최종본을 응답 형식 그대로 전체 다시 작성하십시오. 코드는 생략 없이.` }], maxTokens: 8192, temperature: 0.3 });
+      cur = fx.text;
+    } catch (e) { if (e.kind === 'abort') throw e; run.log('repair 실패', 'warn'); break; }
+  }
+  return { text: cur, unresolved: issues.length > 0, issues };
+}
+
+async function runFast(prompt, history, run, thread) {
+  run.stage('ROUTE');
+  run.log('stage  Zero-Claude · 캐시 → 무료 풀(WRR) → 로컬 Ollama 순서', 'k');
+  run.stage('GENERATE');
+  const r = await callTracked(run, { role: 'general', label: 'generate', system: SYSTEM_CORE, messages: [...history, { role: 'user', content: prompt }] });
+  run.stage('VERIFY');
+  const v = await verifyLoop(run, prompt, r.text, { llm: false, avoid: [r.provider.id] });
+  run.stage('GATE');
+  if (v.unresolved && opts.gateA) {
+    const out = await escalateToClaude(run, 'a', prompt, thread, [['문제 구간 (코드)', codeSection(v.text)], ['미해결 문제', v.issues.join('\n')]], '미해결 문제만 고친 최종 결과물을 응답 형식 그대로 작성하십시오. 코드는 생략 없이 완성본으로.');
+    if (out) return out;
+  } else run.log(v.unresolved ? 'gate   미해결 문제 있음 · 게이트(a) 꺼짐 → Zero-Claude 유지' : 'gate   승격 조건 없음 → Zero-Claude 유지 (Claude 0 tok)', 'ok');
+  return v.text;
+}
+
+async function runCouncil(prompt, history, run, thread, forceClaude) {
   const hist = history.slice(-6);
   run.stage('STRATEGIST');
   run.log('stage  [전략가] 최단 경로·설계 도출 (fast/plan 선호: Groq → Gemini)', 'k');
   const s = await callTracked(run, { role: 'plan', label: 'strategist', system: ROLE_PROMPTS.strategist, messages: [...hist, { role: 'user', content: prompt }], maxTokens: 1200, temperature: 0.5 });
   run.stage('IMPLEMENTER');
-  run.log('stage  [구현자] 산출물 초안 생성 (code 선호: Gemini/Mistral/NIM, 전략가와 다른 모델 우대)', 'k');
+  run.log('stage  [구현자] 산출물 초안 생성 (code 선호, 전략가와 다른 모델 우대)', 'k');
   const impl = await callTracked(run, { role: 'code', label: 'implementer', system: ROLE_PROMPTS.implementer, avoid: [s.provider.id], messages: [...hist, { role: 'user', content: `요청:\n${prompt}\n\n[전략가 설계]\n${s.text}` }], maxTokens: 8192, temperature: 0.5 });
   run.stage('CRITIC');
   run.log('stage  [비판가] 한도/오류/함정 교차 검증 (verify 선호: OpenRouter, 구현자와 다른 모델 우대)', 'k');
   const c = await callTracked(run, { role: 'verify', label: 'critic', system: ROLE_PROMPTS.critic, avoid: [impl.provider.id], messages: [{ role: 'user', content: `요청:\n${prompt}\n\n[초안]\n${impl.text.slice(0, 24000)}` }], maxTokens: 1200, temperature: 0.3 });
+
   run.stage('SYNTH');
-  const claudeOk = opts.synthWithClaude && usable(prov.claude);
-  run.log(claudeOk ? 'stage  [최종 합의] Claude 주력 브레인 통합 · 모순/누락 제거' : 'stage  [최종 합의] Claude 키 없음 → 무료 풀 최상위 모델로 통합', 'k');
+  const reason = forceClaude ? 'b' : archGate(prompt, thread) ? 'c' : null;
+  if (reason) {
+    run.log(`gate   승격 후보 ${reason === 'b' ? '(b) Claude Final Pass 지정' : '(c) 대규모 아키텍처 첫 설계'} → 최종 통합을 Claude에 위임 시도`, 'k');
+    const out = await escalateToClaude(run, reason, prompt, thread, [['전략가 설계', s.text], ['구현자 초안 (핵심 산출물)', impl.text.slice(0, 16000)], ['비판가 지적', c.text]], '세 관점을 통합해 모순과 누락을 제거한 최종 결과물을 응답 형식 그대로 작성하십시오. 비판가의 타당한 지적은 반영하고 코드는 생략 없이.');
+    if (out) {
+      if (reason === 'c' && thread) thread.archConfirmed = true;
+      run.stage('VERIFY');
+      const st = staticCheck(out);
+      run.log(st.length ? `verify static ${st.length}건 (Claude 결과 · 추가 Claude 호출 안 함)` : 'verify static PASS', st.length ? 'warn' : 'ok');
+      run.stage('GATE');
+      return out;
+    }
+  }
+  run.log('stage  [최종 합의] 무료 풀 모델로 통합 (Zero-Claude)', 'k');
   const synth = await callTracked(run, {
-    role: 'synth', label: 'synth', prefer: claudeOk ? 'claude' : null, system: SYSTEM_CORE,
+    role: 'synth', label: 'synth', system: SYSTEM_CORE,
     messages: [...hist, { role: 'user', content: `사용자 요청:\n${prompt}\n\n[전략가 설계]\n${s.text}\n\n[구현자 초안]\n${impl.text.slice(0, 30000)}\n\n[비판가 지적]\n${c.text}\n\n위 세 관점을 통합해 모순과 누락을 제거한 최종 결과물을 응답 형식 그대로 작성하십시오. 비판가의 타당한 지적은 수정해 반영하고, 코드는 생략 없이 완성본으로 다시 쓰십시오.` }],
     maxTokens: 8192, temperature: 0.4,
   });
-  return synth.text;
+  run.stage('VERIFY');
+  const v = await verifyLoop(run, prompt, synth.text, { llm: true, avoid: [synth.provider.id] });
+  run.stage('GATE');
+  if (v.unresolved && opts.gateA) {
+    const out = await escalateToClaude(run, 'a', prompt, thread, [['문제 구간 (코드)', codeSection(v.text)], ['교차 검증 미해결 문제', v.issues.join('\n')]], '미해결 문제만 고친 최종 결과물을 응답 형식 그대로 작성하십시오. 코드는 생략 없이 완성본으로.');
+    if (out) return out;
+  } else if (!reason) run.log(v.unresolved ? 'gate   미해결 문제 있음 · 게이트(a) 꺼짐 → Zero-Claude 유지' : 'gate   승격 조건 없음 → Zero-Claude 유지 (Claude 0 tok)', 'ok');
+  return v.text;
 }
 
 async function runImage(prompt, run) {
@@ -763,7 +892,7 @@ function persistArtifacts() { const t = curThread(); if (t && artifacts) { t.art
 /* ================= RUN UI ================= */
 let centerRain;
 function createRunUI(mode) {
-  const stages = mode === 'council' ? STAGES_COUNCIL : mode === 'image' ? STAGES_IMAGE : STAGES_FAST;
+  const stages = mode === 'council' || mode === 'claude' ? STAGES_COUNCIL : mode === 'image' ? STAGES_IMAGE : STAGES_FAST;
   const el = document.createElement('div'); el.className = 'msg ai';
   el.innerHTML = `<div class="who"><i>AI</i>CORE ORCHESTRATOR <span class="meta">· executing</span></div>
   <div class="run"><div class="run-head"><span class="spin"></span><span class="ttl">LIVE CODE STREAM</span><span class="tm">0.0s</span></div>
@@ -912,8 +1041,8 @@ function renderStatus() {
   const tok = t ? t.messages.reduce((a, m) => a + estTok(m.modelText || m.content), 0) : 0;
   const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
   const total = Object.values(prov).filter((p) => !p.primary && !p.local).length;
-  $('#statusLine').innerHTML = `<span>POOL <b>${ready}/${total}</b> ready</span><span>LOCAL <b>${prov.ollama.enabled ? 'ollama on' : 'off'}</b></span><span>BRAIN <b>${usable(prov.claude) ? prov.claude.model : 'claude 키 없음 → 대체 통합'}</b></span><span>CTX <b>~${tok.toLocaleString()}</b>/${opts.compressAt.toLocaleString()} tok${t?.summary ? ' · 압축됨' : ''}</span><span>CACHE <b>${LS.get('cidx', []).length}</b> · TTL ${opts.ttl}s</span>`;
-  $('#modeBadge').textContent = state.mode === 'council' ? 'COUNCIL · 멀티 AI 상의' : 'FAST · 단일 경로';
+  $('#statusLine').innerHTML = `<span>POOL <b>${ready}/${total}</b> ready</span><span>LOCAL <b>${prov.ollama.enabled ? 'ollama on' : 'off'}</b></span><span>CLAUDE <b>${(() => { const c = claudeUse(); return `ZERO-DEFAULT · ${(c.in + c.out).toLocaleString()} tok · 승격 ${c.calls}회`; })()}</b>${usable(prov.claude) ? '' : ' (키 없음)'}</span><span>CTX <b>~${tok.toLocaleString()}</b>/${opts.compressAt.toLocaleString()} tok${t?.summary ? ' · 압축됨' : ''}</span><span>CACHE <b>${LS.get('cidx', []).length}</b> · TTL ${opts.ttl}s</span>`;
+  $('#modeBadge').textContent = ({ council: 'COUNCIL · ZERO-CLAUDE', fast: 'FAST · ZERO-CLAUDE', claude: 'CLAUDE FINAL PASS' })[state.mode];
 }
 
 /* ================= SETTINGS ================= */
@@ -932,8 +1061,12 @@ function renderSettings() {
   body.innerHTML = `
     <div class="set-sec"><h4>무료 클라우드 풀 · WEIGHTED ROUND-ROBIN</h4><p>키는 이 브라우저 localStorage에만 저장되고 각 프로바이더로 직접 전송됩니다. 429 → ${opts.cooldown429}s 쿨다운, 5xx/타임아웃 → 즉시 다음 프로바이더로 failover.</p>${rows(pool)}</div>
     <div class="set-sec"><h4>로컬 무제한 폴백 · OLLAMA</h4><p>외부 풀이 모두 쿨다운/실패일 때 사용. 실행 전 <code>OLLAMA_ORIGINS=${esc(location.origin)} ollama serve</code> 로 이 사이트를 허용하세요. 코딩: 기본 모델, 라우팅/요약: 경량 모델.</p>${rows([prov.ollama])}<div class="orow"><span></span><span><button type="button" class="btn-sm" id="testOllama">연결 테스트</button> <span id="ollamaRes" style="font:11px var(--mono)"></span></span></div></div>
-    <div class="set-sec"><h4>주력 브레인 · CLAUDE 최종 통합</h4><p>멀티 AI 토론 결과 취합·최종 품질 검증에 사용. 키가 없으면 무료 풀 최상위 모델이 대신 통합합니다.</p>${rows([prov.claude])}
-      <div class="orow"><span>최종 통합에 Claude 우선 사용</span><span><input type="checkbox" id="optSynth" ${opts.synthWithClaude ? 'checked' : ''} style="width:auto;accent-color:#00FF66"></span></div></div>
+    <div class="set-sec"><h4>주력 브레인 · CLAUDE (ZERO-CLAUDE 기본)</h4><p>기본은 Claude 0 tok: 캐시 → 무료 풀 → 로컬 Ollama. Claude는 승격 게이트에서만 호출되며 전체 대화 대신 [State Snapshot]+문제 구간만 보내고, 시스템 프롬프트는 Prompt Caching 블록으로 분리합니다. 이번 달 사용: ${(() => { const c = claudeUse(); return `${c.calls}회 · in ${c.in.toLocaleString()} (cache read ${c.cr.toLocaleString()}) / out ${c.out.toLocaleString()} tok`; })()}</p>${rows([prov.claude])}
+      <div class="orow"><span>(a) 무료 교차 검증 미해결 시 승격</span><span><input type="checkbox" id="optGateA" ${opts.gateA ? 'checked' : ''} style="width:auto;accent-color:#00FF66"></span></div>
+      <div class="orow"><span>(b) Claude Final Pass 모드</span><span style="font:12px var(--mono);color:var(--mut)">입력창 모드 버튼으로 직접 지정할 때만</span></div>
+      <div class="orow"><span>(c) 대규모 아키텍처 첫 설계 확정 시 승격</span><span><input type="checkbox" id="optGateC" ${opts.gateC ? 'checked' : ''} style="width:auto;accent-color:#00FF66"></span></div>
+      <div class="orow"><span>Claude 월 토큰 상한 (in+out, 0=무제한)</span><input type="number" id="optClaudeCap" value="${opts.claudeMonthlyCap}" min="0" step="10000"></div>
+      <div class="orow"><span>Claude 1회 최대 출력 토큰</span><input type="number" id="optClaudeOut" value="${opts.claudeMaxOut}" min="500" max="16000" step="500"></div></div>
     <div class="set-sec"><h4>오케스트레이터</h4>
       <div class="orow"><span>캐시 TTL (초)</span><input type="number" id="optTtl" value="${opts.ttl}" min="0"></div>
       <div class="orow"><span>컨텍스트 압축 임계 (토큰)</span><input type="number" id="optCompress" value="${opts.compressAt}" min="1000" step="500"></div>
@@ -958,7 +1091,9 @@ function collectSettings() {
       else { const v = inp.value.trim(); const before = p[f]; p[f] = v || (f === 'model' || f === 'base' || f === 'fastModel' ? PROVIDER_DEFS.find((d) => d.id === p.id)[f] || '' : ''); if (f === 'key' && before !== p[f]) { p.health = 1; p.cooldownUntil = 0; p.lastErr = ''; } }
     });
   });
-  opts.synthWithClaude = $('#optSynth').checked;
+  opts.gateA = $('#optGateA').checked; opts.gateC = $('#optGateC').checked;
+  opts.claudeMonthlyCap = Math.max(0, Number($('#optClaudeCap').value) || 0);
+  opts.claudeMaxOut = Math.max(500, Math.min(16000, Number($('#optClaudeOut').value) || 6000));
   opts.ttl = Math.max(0, Number($('#optTtl').value) || 86400);
   opts.compressAt = Math.max(1000, Number($('#optCompress').value) || 6000);
   opts.keepRecent = Math.max(2, Math.min(12, Number($('#optKeep').value) || 4));
@@ -994,7 +1129,7 @@ async function login(id, pw, keep) {
 async function bootTo(u) {
   user = u;
   const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
-  const lines = [`<span class="g">$</span> mount workspace --user ${esc(u.id)}`, `<span class="ok">✔</span> free pool ${ready} provider(s) online · cache TTL ${opts.ttl}s`, `<span class="ok">✔</span> live code stream ready`];
+  const lines = [`<span class="g">$</span> mount workspace --user ${esc(u.id)}`, `<span class="ok">✔</span> free pool ${ready} provider(s) online · cache TTL ${opts.ttl}s`, `<span class="ok">✔</span> zero-claude default · live code stream ready`];
   for (const l of lines) { termLine(l); await sleep(260); }
   const gate = $('#gate');
   gate.classList.add('leaving');
