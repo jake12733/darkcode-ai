@@ -1194,7 +1194,7 @@ function wire() {
     waterfall = new DarkFX.CodeWaterfall($('#wfCanvas'), () => (artifacts?.files || []).flatMap((f) => ['// ──── ' + f.name + ' ────', ...f.code.split('\n')]).filter((l) => l.trim()).slice(0, 4000));
   }
   $('#dashChips').innerHTML = WELCOME_CHIPS.map(([k, v]) => `<button data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('');
-  $('#dashChips button').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
+  $$('#dashChips button').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
   $('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate
   const clock = () => { $('#gateClock').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false }); };
