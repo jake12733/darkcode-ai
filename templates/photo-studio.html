@@ -11,7 +11,7 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);line-height:1.6;overflow-x:hidden;word-break:keep-all;overflow-wrap:anywhere}
 img{max-width:100%;display:block}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
@@ -317,7 +317,7 @@ footer .links{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
     <div class="wrap">
       <span class="eyebrow reveal">Booking</span>
       <h2 class="sec reveal">촬영 예약</h2>
-      <p class="lead reveal">필수 항목을 입력하면 예약 번호가 발급되고 오른쪽 예약 현황에 바로 추가됩니다.</p>
+      <p class="lead reveal">필수 항목을 입력하면 예약 번호가 발급되고 예약 현황에 바로 추가됩니다.</p>
       <div class="bk-grid">
         <form class="panel form" id="bkForm" novalidate>
           <div class="fld"><label for="fName">이름 <i>*</i></label><input id="fName" name="name" autocomplete="name" maxlength="30"><span class="msg"></span></div>
