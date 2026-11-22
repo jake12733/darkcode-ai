@@ -197,7 +197,7 @@ async function callProvider(p, { system, messages, onToken, signal, maxTokens = 
     const base = (p.base || '').replace('{account}', p.account || '').replace(/\/$/, '');
     const headers = { 'Content-Type': 'application/json' };
     if (p.key) headers.Authorization = `Bearer ${p.key}`;
-    if (p.id === 'openrouter') { headers['HTTP-Referer'] = location.origin + location.pathname; headers['X-Title'] = 'Polyship AI Core'; }
+    if (p.id === 'openrouter') { headers['HTTP-Referer'] = location.origin + location.pathname; headers['X-Title'] = 'DARK CODE'; }
     const msgs = (system ? [{ role: 'system', content: system }] : []).concat(messages.map((m) => ({ role: m.role, content: m.content })));
     const { res, ctl } = await fetchWithTimeout(`${base}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ model, messages: msgs, stream: true, max_tokens: maxTokens, temperature }) }, signal);
     if (!res.ok) throw await readError(res);
@@ -231,8 +231,10 @@ async function callProvider(p, { system, messages, onToken, signal, maxTokens = 
 }
 
 /* ================= ROUTER ================= */
-function markOk(p, ms) { p.ok++; p.health = Math.min(1, p.health + 0.12); p.lat = p.lat ? Math.round(p.lat * 0.7 + ms * 0.3) : Math.round(ms); p.lastErr = ''; saveHealth(); renderPool(); }
+const TEL = () => window.DarkFX?.telemetry;
+function markOk(p, ms) { TEL()?.call({ pid: p.id, short: p.short, ms, ok: true }); p.ok++; p.health = Math.min(1, p.health + 0.12); p.lat = p.lat ? Math.round(p.lat * 0.7 + ms * 0.3) : Math.round(ms); p.lastErr = ''; saveHealth(); renderPool(); }
 function markFail(p, e) {
+  if (e.kind !== 'abort') TEL()?.call({ pid: p.id, short: p.short, ok: false, status: e.status || e.kind });
   p.fail++; p.lastErr = `${e.status || e.kind}: ${e.message}`.slice(0, 160);
   const now = Date.now();
   if (e.kind === 'abort') return;
@@ -327,7 +329,7 @@ function cachePut(key, value) {
 function cacheClear() { for (const k of LS.get('cidx', [])) LS.del('c:' + k); LS.set('cidx', []); }
 
 /* ================= PROMPTS ================= */
-const SYSTEM_CORE = `당신은 Polyship AI의 코어 오케스트레이터이자 자율 실행 에이전트입니다.
+const SYSTEM_CORE = `당신은 DARK CODE의 코어 오케스트레이터이자 자율 실행 에이전트입니다.
 - "방법" 안내에 그치지 말고 즉시 사용·배포 가능한 실제 산출물(완성 코드, 기획, 프롬프트, 스크립트, 구성안)을 만듭니다. 불확실한 항목은 합리적인 기본값으로 채우고 가정을 한 줄로 밝힙니다.
 - 한국어로, 군더더기 없이 결론부터. 코드는 생략("...", "나머지 동일") 없이 바로 실행 가능한 완성본을 언어가 표시된 코드 블록에 담습니다.
 - 웹 페이지/UI 요청이면 CSS·JS를 내장한 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)을 반드시 포함하십시오. 플랫폼의 우측 미리보기 패널에 바로 렌더됩니다. 이미지가 필요하면 https://image.pollinations.ai/prompt/<영문 프롬프트>?width=1200&height=800&nologo=true 형식 URL을 사용할 수 있습니다.
@@ -561,6 +563,7 @@ async function execute(prompt, { noCache = false } = {}) {
   thread.updated = Date.now();
   saveThreads(); renderThreads(); renderStream();
 
+  setCenterView('work');
   const run = createRunUI(mode);
   state.running = run;
   setRunning(true);
@@ -572,14 +575,14 @@ async function execute(prompt, { noCache = false } = {}) {
     if (noCache) run.log('cache  bypass (다시 실행)', 't');
     let modelText, sec, snap;
     if (hit) {
-      run.cacheHit = true;
+      run.cacheHit = true; TEL()?.cache(true);
       run.log(`cache  HIT (${Math.round((Date.now() - hit.t) / 60000)}분 전 생성) → 재사용, API 호출 0회`, 'ok');
       run.rain(hit.modelText);
       await sleep(900);
       modelText = hit.modelText; run.calls = hit.calls || [];
       run.skipStages();
     } else {
-      run.log('cache  MISS', 't');
+      run.log('cache  MISS', 't'); TEL()?.cache(false);
       if (mode === 'image') modelText = await runImage(prompt, run);
       else {
         run.stage('CONTEXT');
@@ -877,6 +880,7 @@ function updateTabCounts() {
   $('#rtabs [data-tab=code]').innerHTML = `코드${n ? `<span class="n">${n}</span>` : ''}`;
 }
 function updateFoot() {
+  if (state.rightTab === 'stream') { $('#rightFoot').textContent = 'CODE STREAM · looping waterfall · 탭을 벗어나면 자동 정지'; return; }
   const t = state.rightTab === 'code' ? $('#codeEdit').value : $('#docEdit').value;
   const words = (t.trim().match(/\S+/g) || []).length;
   $('#rightFoot').textContent = `${words.toLocaleString()} 단어 · ${t.length.toLocaleString()} 자 · 이 브라우저에 저장됨`;
@@ -884,8 +888,17 @@ function updateFoot() {
 function switchTab(tab) {
   state.rightTab = tab;
   $$('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  $$('.rview').forEach((v) => v.classList.toggle('on', v.dataset.view === tab));
+  $('.rview').forEach((v) => v.classList.toggle('on', v.dataset.view === tab));
   updateFoot();
+  syncWaterfall();
+}
+function rightVisible() { const app = $('#app'); return !app.hidden && (innerWidth <= 1180 ? app.classList.contains('show-right') : !app.classList.contains('no-right')); }
+function syncWaterfall() { if (!waterfall) return; if (state.rightTab === 'stream' && rightVisible()) waterfall.start(); else waterfall.stop(); }
+function setCenterView(v) {
+  state.centerView = v;
+  $('#cvTabs button').forEach((b) => b.classList.toggle('on', b.dataset.cv === v));
+  $('#dash').hidden = v !== 'dash'; $('#stream').hidden = v === 'dash';
+  if (dashboard) { if (v === 'dash' && !$('#app').hidden) dashboard.start(); else dashboard.stop(); }
 }
 function persistArtifacts() { const t = curThread(); if (t && artifacts) { t.artifacts = artifacts; saveThreads(); } }
 
@@ -917,6 +930,7 @@ function createRunUI(mode) {
       d.innerHTML = `<span class="t">+${ts}s</span> ${esc(msg)}`;
       logbox.append(d); logbox.scrollTop = logbox.scrollHeight;
       rain.feed(msg + ' '); centerRain.feed(msg + ' ');
+      if (/route|done|fail|gate|cache|verify|fallback|claude/.test(msg)) TEL()?.log(msg, cls);
       if (stick) scrollStream();
     },
     rain(text) { rain.feed(text); centerRain.feed(text); tailBuf = (tailBuf + text).slice(-220); tail.textContent = '> ' + tailBuf.replace(/\s+/g, ' '); },
@@ -943,6 +957,7 @@ function createRunUI(mode) {
 function scrollStream() { const s = $('#stream'); s.scrollTop = s.scrollHeight; }
 
 function setRunning(on) {
+  if (TEL()) TEL().running = on;
   const b = $('#sendBtn');
   b.classList.toggle('stop', on); b.innerHTML = on ? '&#9632;' : '&#8593;'; b.title = on ? '중단' : '실행';
   b.disabled = !on && !$('#prompt').value.trim();
@@ -965,11 +980,11 @@ function renderStream() {
   s.innerHTML = '';
   $('#threadTitle').textContent = t?.title || '새 작업';
   if (!t || !t.messages.length) {
-    s.innerHTML = `<div class="welcome"><div class="ascii">${esc(` ____   ___  _  __   ______  _   _ ___ ____
-|  _ \\ / _ \\| | \\ \\ / / ___|| | | |_ _|  _ \\
-| |_) | | | | |  \\ V /\\___ \\| |_| || || |_) |
-|  __/| |_| | |___| |  ___) |  _  || ||  __/
-|_|    \\___/|_____|_| |____/|_| |_|___|_|    CORE`)}</div>
+    s.innerHTML = `<div class="welcome"><div class="ascii">${esc(` ____    _    ____  _  __   ____ ___  ____  _____
+|  _ \\  / \\  |  _ \\| |/ /  / ___/ _ \\|  _ \\| ____|
+| | | |/ _ \\ | |_) | ' /  | |  | | | | | | |  _|
+| |_| / ___ \\|  _ <| . \\  | |__| |_| | |_| | |___
+|____/_/   \\_\\_| \\_\\_|\\_\\  \\____\\___/|____/|_____|`)}</div>
       <h1>무엇을 <b>실행</b>할까요?</h1><p>코딩 · 웹/앱/SaaS · DB 연동 · 이미지/영상/음악 기획까지. 명령하면 멀티 AI가 상의해 완성본을 만듭니다.</p>
       <div class="chips">${WELCOME_CHIPS.map(([k, v]) => `<button class="chip" data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('')}</div></div>`;
     $$('.chip', s).forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
@@ -1015,7 +1030,7 @@ function renderThreads() {
     d.onclick = (e) => {
       if (e.target.closest('.del')) { if (state.running && t.id === state.cur) return; threads = threads.filter((x) => x.id !== t.id); if (state.cur === t.id) state.cur = threads[0]?.id || null; saveThreads(); renderThreads(); renderStream(); applyArtifacts(curThread()?.artifacts || null); return; }
       if (state.running) { toast('실행 중에는 전환할 수 없습니다'); return; }
-      state.cur = t.id; renderThreads(); renderStream(); applyArtifacts(t.artifacts || null); $('#app').classList.remove('show-side');
+      state.cur = t.id; renderThreads(); renderStream(); applyArtifacts(t.artifacts || null); setCenterView('work'); $('#app').classList.remove('show-side');
     };
     box.append(d);
   }
@@ -1129,7 +1144,7 @@ async function login(id, pw, keep) {
 async function bootTo(u) {
   user = u;
   const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
-  const lines = [`<span class="g">$</span> mount workspace --user ${esc(u.id)}`, `<span class="ok">✔</span> free pool ${ready} provider(s) online · cache TTL ${opts.ttl}s`, `<span class="ok">✔</span> zero-claude default · live code stream ready`];
+  const lines = [`<span class="g">$</span> mount workspace --user ${esc(u.id)}`, `<span class="ok">✔</span> free pool ${ready} provider(s) online · cache TTL ${opts.ttl}s`, `<span class="ok">✔</span> DARK CODE online · zero-claude default`];
   for (const l of lines) { termLine(l); await sleep(260); }
   const gate = $('#gate');
   gate.classList.add('leaving');
@@ -1153,6 +1168,7 @@ function showRight(on) {
   const app = $('#app');
   if (innerWidth <= 1180) app.classList.toggle('show-right', on);
   else app.classList.toggle('no-right', !on);
+  syncWaterfall();
 }
 function enterWorkspace() {
   $('#userName').textContent = user.guest ? 'guest' : user.name;
@@ -1162,11 +1178,24 @@ function enterWorkspace() {
   renderThreads(); renderStream(); renderPool(); renderRouteSel(); renderStatus(); renderFree();
   applyArtifacts(curThread()?.artifacts || null);
   if (innerWidth <= 1180) $('#app').classList.remove('show-right');
+  setCenterView(curThread()?.messages.length ? 'work' : 'dash');
+  syncWaterfall();
   $('#prompt').focus();
 }
 
+let dashboard = null, waterfall = null;
 function wire() {
   centerRain = new CodeRain($('#centerRain'), { size: 16, speed: 0.8, fade: 0.07 });
+  if (window.DarkFX) {
+    const T = DarkFX.telemetry;
+    T.providers = () => Object.values(prov).map((p) => ({ id: p.id, short: p.short, state: provState(p), health: p.health, lat: p.lat, primary: !!p.primary, local: !!p.local }));
+    T.claude = claudeUse; T.free = () => [freeUse(), FREE_DAILY_CAP]; T.cacheSize = () => LS.get('cidx', []).length;
+    dashboard = new DarkFX.Dashboard(); dashboard.mount();
+    waterfall = new DarkFX.CodeWaterfall($('#wfCanvas'), () => (artifacts?.files || []).flatMap((f) => ['// ──── ' + f.name + ' ────', ...f.code.split('\n')]).filter((l) => l.trim()).slice(0, 4000));
+  }
+  $('#dashChips').innerHTML = WELCOME_CHIPS.map(([k, v]) => `<button data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('');
+  $('#dashChips button').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
+  $('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate
   const clock = () => { $('#gateClock').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false }); };
   clock(); setInterval(clock, 1000);
@@ -1183,7 +1212,7 @@ function wire() {
     finally { $('#loginBtn').disabled = false; }
   });
   $('#guestBtn').onclick = async () => { const u = { id: 'guest', name: 'guest', guest: true }; setSession(u, false); termLine('<span class="g">$</span> auth --guest'); await bootTo(u); };
-  $('#logoutBtn').onclick = () => { if (state.running) state.running.abort(); clearSession(); user = null; showGate(); };
+  $('#logoutBtn').onclick = () => { if (state.running) state.running.abort(); dashboard?.stop(); waterfall?.stop(); clearSession(); user = null; showGate(); };
 
   // composer
   const ta = $('#prompt');
@@ -1198,13 +1227,13 @@ function wire() {
   });
   $$('#modeSeg button').forEach((b) => (b.onclick = () => { state.mode = b.dataset.mode; $$('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b)); renderStatus(); }));
   $('#routeSel').onchange = (e) => { state.route = e.target.value; toast(state.route === 'auto' ? 'AUTO 라운드로빈' : `${prov[state.route].name} 고정 (실패 시 로컬/Claude 폴백)`); };
-  $('#newBtn').onclick = () => { if (state.running) return toast('실행 중입니다'); state.cur = null; renderThreads(); renderStream(); applyArtifacts(null); renderStatus(); $('#app').classList.remove('show-side'); ta.focus(); };
+  $('#newBtn').onclick = () => { if (state.running) return toast('실행 중입니다'); state.cur = null; renderThreads(); renderStream(); applyArtifacts(null); renderStatus(); setCenterView('dash'); $('#app').classList.remove('show-side'); ta.focus(); };
   $('#threadSearch').oninput = renderThreads;
 
   // header
   $('#sideToggle').onclick = () => $('#app').classList.toggle('show-side');
-  $('#panelToggle').onclick = () => { const app = $('#app'); if (innerWidth <= 1180) app.classList.toggle('show-right'); else app.classList.toggle('no-right'); };
-  $('#rClose').onclick = () => $('#app').classList.remove('show-right');
+  $('#panelToggle').onclick = () => { const app = $('#app'); if (innerWidth <= 1180) app.classList.toggle('show-right'); else app.classList.toggle('no-right'); syncWaterfall(); };
+  $('#rClose').onclick = () => { $('#app').classList.remove('show-right'); syncWaterfall(); };
   $('#rExpand').onclick = () => $('#app').classList.toggle('wide-right');
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j' && !$('#app').hidden) { e.preventDefault(); $('#panelToggle').click(); } });
   const dlg = $('#settings');
