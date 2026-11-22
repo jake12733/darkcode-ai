@@ -333,7 +333,12 @@ function cacheClear() { for (const k of LS.get('cidx', [])) LS.del('c:' + k); LS
 const SYSTEM_CORE = `당신은 DARK CODE의 코어 오케스트레이터이자 자율 실행 에이전트입니다.
 - "방법" 안내에 그치지 말고 즉시 사용·배포 가능한 실제 산출물(완성 코드, 기획, 프롬프트, 스크립트, 구성안)을 만듭니다. 불확실한 항목은 합리적인 기본값으로 채우고 가정을 한 줄로 밝힙니다.
 - 한국어로, 군더더기 없이 결론부터. 코드는 생략("...", "나머지 동일") 없이 바로 실행 가능한 완성본을 언어가 표시된 코드 블록에 담습니다.
-- 웹 페이지/UI 요청이면 CSS·JS를 내장한 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)을 반드시 포함하십시오. 플랫폼의 우측 미리보기 패널에 바로 렌더됩니다. 이미지가 필요하면 https://image.pollinations.ai/prompt/<영문 프롬프트>?width=1200&height=800&nologo=true 형식 URL을 사용할 수 있습니다.
+- 웹 페이지/UI 요청이면 CSS·JS를 내장한 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)을 반드시 포함하십시오. 플랫폼의 우측 미리보기 패널에 바로 렌더됩니다. 웹 산출물 규칙(반드시 준수):
+  1) 빌드·외부 파일 없이 미리보기에서 즉시 렌더되는 완결된 단일 HTML/CSS/JS. 라이브러리·폰트도 없이 동작하게(시스템 폰트 스택).
+  2) 외부 이미지 URL(AI 이미지 생성 링크, unsplash/picsum/placeholder 등)을 img src나 CSS url()에 절대 쓰지 마십시오. 대신 인라인 SVG, Canvas로 그린 그래픽, data URI, 또는 사용자 사진 업로드(파일 선택·드래그앤드롭)를 구현해 빈칸·깨진 이미지가 없게 하십시오.
+  3) 모든 버튼·탭·필터·모달·폼은 실제 상태 변화와 시각 피드백을 가지며, 주요 데이터는 localStorage에 저장·복원합니다. localStorage가 막힌 샌드박스(미리보기)에서는 조용히 메모리 저장으로 대체하고 오류 배너를 띄우지 마십시오. 폼은 필수값 검증·완료 피드백을 포함합니다.
+  4) 원격 접속·제어 기능을 넣을 때는 대상자가 명시적으로 수락(ACCEPT)한 경우에만 활성화되는 상태 머신(PENDING → ACCEPTED → CONNECTED / TERMINATED, 만료 타이머, 거절·종료 시 즉시 해제·기록 저장)로 만들고, 실행 로그는 브라우저가 실제로 할 수 있는 작업만 표시합니다(가짜 바이러스/PC 스캔 문구 금지).
+  5) 외부 웹사이트를 iframe으로 삽입하지 말고 window.open(url, '_blank', 'noopener,noreferrer')로 열며, 상단 네비 스무스 스크롤·모바일 메뉴·360px 폭까지 가로 넘침/요소 겹침 없는 반응형을 완성합니다.
 - 디자인 기본 톤(사용자가 다른 톤을 지정하지 않은 경우): 검정(#000000~#060907) 바탕 + 네온 그린(#00FF66, #22C55E, #16A34A) 포인트, 사이버/터미널 감성, 완전 반응형.
 - DB 연동 요청이면 스키마(SQL 또는 Firestore 구조), 연동 코드, 환경 변수 예시, 보안 규칙을 함께 제공합니다. API 키는 예시값으로만 표기합니다.
 - 이미지·영상·음악 요청이면 바로 쓸 수 있는 생성 프롬프트(영문 + 한글 설명), 컷/트랙 구성, 파라미터를 구체적으로 제공합니다.
@@ -841,6 +846,17 @@ function renderFiles() {
   $('#codeEdit').value = f.code; updateGutter();
   $('#codeMeta').textContent = `${f.name} · ${f.lang} · ${f.code.split('\n').length} lines`;
 }
+// preview safety: external images -> inline SVG, external iframes -> new-tab link card (no broken images, no framed sites)
+const svgPh = (label, i) => { const h = (i * 47) % 360; return 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h},35%,15%)"/><stop offset="1" stop-color="#020403"/></linearGradient><radialGradient id="r" cx=".72" cy=".28" r=".6"><stop offset="0" stop-color="hsla(145,100%,50%,.32)"/><stop offset="1" stop-color="hsla(145,100%,50%,0)"/></radialGradient></defs><rect width="1200" height="800" fill="url(#g)"/><rect width="1200" height="800" fill="url(#r)"/><circle cx="600" cy="360" r="118" fill="none" stroke="#00FF66" stroke-opacity=".55" stroke-width="3"/><path d="M540 400l42-52 34 40 22-26 50 38z" fill="#00FF66" fill-opacity=".55"/><text x="600" y="560" text-anchor="middle" font-family="monospace" font-size="30" fill="#9fe3b8">${label}</text></svg>`); };
+function sanitizePreview(html) {
+  let n = 0;
+  html = html.replace(/\s(srcset)\s*=\s*(["'])[^"']*https?:\/\/[^"']*\2/gi, '');
+  html = html.replace(/(<img\b[^>]*?\bsrc\s*=\s*)(["'])(?:https?:)?\/\/[^"']+\2/gi, (m, pre, q) => { n++; return `${pre}${q}${svgPh('IMAGE ' + n, n)}${q}`; });
+  html = html.replace(/url\(\s*(["']?)(?:https?:)?\/\/[^)"']+\1\s*\)/gi, (m) => { if (/fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com/i.test(m)) return m; n++; return `url("${svgPh('BG ' + n, n)}")`; });
+  html = html.replace(/<iframe\b[^>]*\bsrc\s*=\s*(["'])(https?:\/\/[^"']+)\1[^>]*>(?:\s*<\/iframe>)?/gi, (m, q, url) => { n++; return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;min-height:160px;border:1px dashed #2a3a30;border-radius:12px;color:#00FF66;font:600 14px monospace;text-decoration:none">외부 페이지 새 탭에서 열기 ↗</a>`; });
+  sanitizePreview.last = n;
+  return html;
+}
 function buildPreviewDoc(a) {
   if (!a) return null;
   const html = a.files.find((f) => f.lang === 'html');
@@ -852,7 +868,7 @@ function buildPreviewDoc(a) {
     if (css && /<link[^>]+style\.css/i.test(doc)) doc = doc.replace(/<link[^>]+style\.css[^>]*>/i, `<style>${css}</style>`);
     else if (css && !doc.includes(css.slice(0, 40))) doc = doc.replace(/<\/head>/i, `<style>${css}</style></head>`);
     if (js) { doc = doc.replace(/<script[^>]+src=["'][^"']*(app|script|main)\.js["'][^>]*><\/script>/i, ''); if (!doc.includes(js.slice(0, 40))) doc = doc.replace(/<\/body>/i, `<script>${js}<\/script></body>`); }
-    return doc;
+    return sanitizePreview(doc);
   }
   const body = DOMPurify.sanitize(marked.parse(a.doc || ''));
   return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:28px;background:#000;color:#d7f5e1;font:15px/1.75 system-ui,sans-serif}h1,h2,h3{color:#00FF66}pre{background:#031008;border:1px solid #11261a;padding:12px;border-radius:8px;overflow:auto}code{color:#a7ffc9}a{color:#00FF66}table{border-collapse:collapse}td,th{border:1px solid #1b3a27;padding:6px 10px}</style></head><body>${body}</body></html>`;
@@ -867,7 +883,7 @@ function setPreview(doc) {
   }
   fr.style.display = ''; pi.style.display = 'none';
   if (!doc) { fr.srcdoc = `<body style="margin:0;background:#000;color:#4f6e5a;font:12px monospace;display:grid;place-items:center;height:100vh">// 미리보기할 산출물이 없습니다</body>`; $('#pvUrl').textContent = 'preview://empty'; return; }
-  fr.srcdoc = doc; $('#pvUrl').textContent = `preview://${artifacts?.files.find((f) => f.lang === 'html')?.name || (artifacts?.img ? 'image' : 'document')}`;
+  fr.srcdoc = doc; $('#pvUrl').textContent = `preview://${artifacts?.files.find((f) => f.lang === 'html')?.name || (artifacts?.img ? 'image' : 'document')}${htmlFile && sanitizePreview.last ? ` · 외부 리소스 ${sanitizePreview.last}개 내장 대체` : ''}`;
 }
 function openCodeInEditor(code, lang) {
   if (!artifacts) artifacts = { title: '스니펫', doc: '', files: [], img: null, snapshot: '' };
@@ -1434,6 +1450,15 @@ function enterWorkspace() {
 }
 
 let dashboard = null, waterfall = null;
+async function openPhotoTemplate() {
+  try {
+    const res = await fetch('templates/photo-studio.html?v=20261122m'); if (!res.ok) throw new Error(res.status);
+    const code = await res.text();
+    const url = location.origin + location.pathname.replace(/[^/]*$/, '') + 'templates/photo-studio.html';
+    applyArtifacts({ title: 'NOIR LUMEN STUDIO · 완성형 사진 웹사이트', doc: `## NOIR LUMEN STUDIO 템플릿\n- 외부 이미지 0개 · 사진은 Canvas로 직접 그린 그래픽 + 내 사진 업로드(드래그앤드롭)\n- 필터(전체/인물·야간/스튜디오/아카이브) · 라이트박스 촬영 스펙 · 예약(검증·번호·상태 변경·삭제)\n- 승인 기반 원격 세션 상태 머신 PENDING → ACCEPTED → CONNECTED / TERMINATED\n- 단독 페이지(로컬 저장 완전 작동): ${url}`, files: [{ name: 'index.html', lang: 'html', code }], img: null, snapshot: 'user_goal: "완성형 사진 웹사이트 템플릿"\nactive_artifacts: ["templates/photo-studio.html"]' }, true);
+    toast('템플릿을 미리보기에 열었습니다');
+  } catch (e) { toast('템플릿 로드 실패: ' + e.message); }
+}
 function wire() {
   centerRain = new CodeRain($('#centerRain'), { size: 16, speed: 0.8, fade: 0.07 });
   if (window.DarkFX) {
@@ -1444,7 +1469,9 @@ function wire() {
     waterfall = new DarkFX.CodeWaterfall($('#wfCanvas'), () => (artifacts?.files || []).flatMap((f) => ['// ──── ' + f.name + ' ────', ...f.code.split('\n')]).filter((l) => l.trim()).slice(0, 4000));
   }
   $('#dashChips').innerHTML = WELCOME_CHIPS.map(([k, v]) => `<button data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('');
-  $$('#dashChips button').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
+  $('#dashChips').insertAdjacentHTML('afterbegin', '<button data-tpl="photo-studio" class="tpl"><small>TEMPLATE</small>완성형 사진 웹사이트 · NOIR LUMEN 바로 열기</button>');
+  $('#dashChips [data-tpl]').onclick = openPhotoTemplate;
+  $$('#dashChips button:not([data-tpl])').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
   $$('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate
   const clock = () => { const d = new Date(); $('#gateClock').textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
