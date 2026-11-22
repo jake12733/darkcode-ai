@@ -86,7 +86,8 @@ async function applyQuality(sender, preset) {
   if (p.br) e.maxBitrate = p.br; else delete e.maxBitrate;
   if (p.fps) e.maxFramerate = p.fps; else delete e.maxFramerate;
   e.scaleResolutionDownBy = p.h && h > p.h ? h / p.h : 1;
-  await sender.setParameters(prm);
+  prm.degradationPreference = 'maintain-resolution';
+  try { await sender.setParameters(prm); } catch { delete prm.degradationPreference; await sender.setParameters(prm); }
   return { br: e.maxBitrate ? Math.round(e.maxBitrate / 1e6) + 'Mbps' : 'auto', fps: e.maxFramerate || 'auto', scale: +e.scaleResolutionDownBy.toFixed(2) };
 }
 
@@ -158,7 +159,7 @@ function renderAccepted() {
       <div class="cs"><span>INPUT</span><b id="cInput">-</b></div>
       <div class="cs"><span>HOST AGENT</span><b id="cAgent">-</b></div>
     </div>
-    <div class="pv"><video id="pv" muted playsinline autoplay></video><i class="rptr" id="rptr"></i><div class="pv-empty" id="pvEmpty"></div></div>
+    <div class="pv${DEMO ? ' demo' : ''}"><video id="pv" muted playsinline autoplay></video><i class="rptr" id="rptr"></i><div class="pv-empty" id="pvEmpty"></div></div>
     <div class="ctl-row">${DEMO ? '' : '<button class="btn-sm" id="btnShare">화면 공유 시작</button>'}${g.input ? '<button class="btn-sm warn" id="btnPause">입력 일시정지</button>' : ''}</div>
     ${g.input && !DEMO ? `
     <div class="agent-box">
@@ -261,6 +262,7 @@ const host = {
   async start(s) {
     this.close(); const g = (this.g = Date.now()); this.q = []; this.lastAnsT = null;
     const pc = (this.pc = new RTCPeerConnection({ iceServers: ICE }));
+    try { s.getVideoTracks()[0].contentHint = 'detail'; } catch {}
     this.sender = pc.addTrack(s.getVideoTracks()[0], s);
     const dc = (this.dc = pc.createDataChannel('dc', { ordered: true }));
     dc.onopen = () => { this.hello(); updateAccepted(); };

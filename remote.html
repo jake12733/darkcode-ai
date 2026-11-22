@@ -553,7 +553,8 @@ async function applyQuality(sender, preset) {
   if (p.br) e.maxBitrate = p.br; else delete e.maxBitrate;
   if (p.fps) e.maxFramerate = p.fps; else delete e.maxFramerate;
   e.scaleResolutionDownBy = p.h && h > p.h ? h / p.h : 1;
-  await sender.setParameters(prm);
+  prm.degradationPreference = 'maintain-resolution';
+  try { await sender.setParameters(prm); } catch { delete prm.degradationPreference; await sender.setParameters(prm); }
   return { br: e.maxBitrate ? Math.round(e.maxBitrate / 1e6) + 'Mbps' : 'auto', fps: e.maxFramerate || 'auto', scale: +e.scaleResolutionDownBy.toFixed(2) };
 }
 
@@ -731,7 +732,7 @@ class SimHost {
   constructor() {
     this.c = document.createElement('canvas'); this.c.width = 1280; this.c.height = 720;
     this.desk = new VirtualDesktop(this.c.getContext('2d'), 1280, 720); this.desk.draw(performance.now());
-    this.stream = this.c.captureStream(); this.fps = 30; this.n = 0; this.paused = false; this.q = []; this.closed = false;
+    this.stream = this.c.captureStream(); try { this.stream.getVideoTracks()[0].contentHint = 'detail'; } catch {} this.fps = 30; this.n = 0; this.paused = false; this.q = []; this.closed = false;
     this.pc = new RTCPeerConnection({ iceServers: [] });
     this.sender = this.pc.addTrack(this.stream.getVideoTracks()[0], this.stream);
     this.dc = this.pc.createDataChannel('dc', { ordered: true });
