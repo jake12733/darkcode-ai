@@ -81,7 +81,7 @@ export async function loadIntegrations() {
 /* ---------------- remote support sessions (consent-based) ---------------- */
 const SID_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 function newSid() { const a = new Uint8Array(28); crypto.getRandomValues(a); return [...a].map((b) => SID_CH[b % SID_CH.length]).join(''); }
-export async function createRemote({ note, tasks, minutes }) {
+export async function createRemote({ note, tasks, minutes, scope, targetLabel }) {
   await init(); const u = auth.currentUser; if (!u) throw new Error('로그인이 필요합니다');
   const sid = newSid();
   const mins = Math.max(1, Math.min(14, minutes | 0 || 5));
@@ -89,6 +89,7 @@ export async function createRemote({ note, tasks, minutes }) {
     requesterUid: u.uid, requesterName: u.displayName || u.email.split('@')[0], requesterEmail: u.email || '',
     note: String(note || '').slice(0, 300), tasks: (tasks || []).slice(0, 6), status: 'pending',
     createdAt: F.serverTimestamp(), expiresAt: F.Timestamp.fromMillis(Date.now() + mins * 60000), log: [],
+    ...(scope ? { scope: { view: !!scope.view, input: !!scope.input } } : {}), ...(targetLabel ? { targetLabel: String(targetLabel).slice(0, 40) } : {}),
   });
   return sid;
 }
@@ -98,6 +99,9 @@ export async function expireRemote(sid) { await init(); await F.updateDoc(F.doc(
 export async function endRemote(sid, by) { await init(); await F.updateDoc(F.doc(db, 'remoteSessions', sid), { status: by === 'target' ? 'ended' : 'ended', endedAt: F.serverTimestamp(), endedBy: by }); }
 export async function cancelRemote(sid) { await init(); await F.updateDoc(F.doc(db, 'remoteSessions', sid), { status: 'cancelled', endedAt: F.serverTimestamp(), endedBy: 'requester' }); }
 export async function logRemote(sid, msg) { await init(); await F.updateDoc(F.doc(db, 'remoteSessions', sid), { log: F.arrayUnion({ t: Date.now(), msg: String(msg).slice(0, 240) }) }); }
+// WebRTC signaling (rules: only while status == 'accepted'; target writes offer/tice_*, requester writes answer/rice_*)
+export async function putSignal(sid, id, data) { await init(); await F.setDoc(F.doc(db, 'remoteSessions', sid, 'signal', id), data); }
+export async function watchSignals(sid, cb, onErr) { await init(); return F.onSnapshot(F.collection(db, 'remoteSessions', sid, 'signal'), (s) => s.docChanges().forEach((ch) => { if (ch.type !== 'removed') cb(ch.doc.id, ch.doc.data()); }), onErr); }
 export async function deleteRemote(sid) { await init(); await F.deleteDoc(F.doc(db, 'remoteSessions', sid)); }
 export async function listMyRemotes() {
   await init(); const u = auth.currentUser; if (!u) return [];

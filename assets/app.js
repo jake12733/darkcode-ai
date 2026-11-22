@@ -1136,7 +1136,7 @@ function collectSettings() {
 
 /* ================= AUTH (Firebase email/OAuth + local guest) ================= */
 let cloud = null;
-const loadCloud = () => (cloud ? Promise.resolve(cloud) : import('./cloud.js?v=20261122l').then((m) => (cloud = m)));
+const loadCloud = () => (cloud ? Promise.resolve(cloud) : import('./cloud.js?v=20261122r').then((m) => (cloud = m)));
 function getSession() { try { return JSON.parse(sessionStorage.getItem(NS + 'session') || 'null'); } catch { return null; } } // guest only
 function setSession(u) { sessionStorage.setItem(NS + 'session', JSON.stringify(u)); }
 function clearSession() { sessionStorage.removeItem(NS + 'session'); localStorage.removeItem(NS + 'session'); }
@@ -1369,6 +1369,7 @@ function renderRemote() {
   const d = remote.data;
   const statusTxt = { pending: '응답 대기', accepted: '승인됨 · 세션 활성', denied: '거절됨 · 차단', expired: '만료 · 폐기', cancelled: '취소됨', ended: '세션 종료' };
   body.innerHTML = `
+    <div class="rm-console"><a class="btn-neon sm" href="remote.html" target="_blank" rel="noopener noreferrer">원격 제어 콘솔 열기 ↗</a><span>화면 보기 + 마우스·키보드 입력 제어 세션 (수락 후에만 개방)</span></div>
     <p class="modal-note">대상자가 링크를 열어 <b>직접 수락</b>해야만 세션이 활성화됩니다. 거절·시간 초과 시 즉시 폐기되며 양쪽 화면에 같은 상태가 실시간 동기화됩니다. 브라우저는 대상 PC 파일에 접근하지 않으며, 실제 원격 작업은 대상자가 원격 지원 프로그램에서 다시 허용해야 합니다.</p>
     ${!d || ['denied', 'expired', 'cancelled', 'ended'].includes(d.status) ? `
     <div class="rm-form">
@@ -1381,7 +1382,7 @@ function renderRemote() {
     <div class="rm-card st-${d.status}">
       <div class="rm-top"><b>${statusTxt[d.status] || d.status}</b><span class="rm-timer" id="rmTimer"></span></div>
       <div class="rm-row"><span>SESSION</span><code>${remote.sid.slice(0, 4)}-${remote.sid.slice(4, 8)}-${remote.sid.slice(-4)}</code></div>
-      <div class="rm-link"><input readonly value="${consentUrl(remote.sid)}"><button class="btn-sm" id="rmCopy">복사</button><a class="btn-sm" href="${consentUrl(remote.sid)}" target="_blank" rel="noopener">열기</a></div>
+      <div class="rm-link"><input readonly value="${consentUrl(remote.sid)}"><button class="btn-sm" id="rmCopy">복사</button><a class="btn-sm" href="${consentUrl(remote.sid)}" target="_blank" rel="noopener">열기</a><a class="btn-sm" href="remote.html?sid=${remote.sid}" target="_blank" rel="noopener noreferrer">콘솔</a></div>
       ${d.status === 'accepted' && d.target ? `<div class="rm-env">${Object.entries(d.target).map(([k, v]) => `<span>${esc(k)} <b>${esc(v ?? '-')}</b></span>`).join('')}</div>` : ''}
       ${d.status === 'accepted' ? `<div class="rm-log" id="rmLog">${(d.log || []).slice(-30).map((l) => `<div>${hms(l.t)} ${esc(l.msg)}</div>`).join('') || '<div>대상자 화면에 표시할 안내 메시지를 보내세요.</div>'}</div>
         <div class="rm-send"><input id="rmMsg" maxlength="240" placeholder="대상자에게 보낼 안내 (예: AnyDesk 주소를 알려주세요)"><button class="btn-sm" id="rmSend">전송</button></div>` : ''}
@@ -1469,8 +1470,8 @@ function wire() {
     waterfall = new DarkFX.CodeWaterfall($('#wfCanvas'), () => (artifacts?.files || []).flatMap((f) => ['// ──── ' + f.name + ' ────', ...f.code.split('\n')]).filter((l) => l.trim()).slice(0, 4000));
   }
   $('#dashChips').innerHTML = WELCOME_CHIPS.map(([k, v]) => `<button data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('');
-  $('#dashChips').insertAdjacentHTML('afterbegin', '<button data-tpl="photo-studio" class="tpl"><small>TEMPLATE</small>완성형 사진 웹사이트 · NOIR LUMEN 바로 열기</button>');
-  $('#dashChips [data-tpl]').onclick = openPhotoTemplate;
+  $('#dashChips').insertAdjacentHTML('afterbegin', '<button data-tpl="remote" class="tpl"><small>REMOTE</small>원격 제어 콘솔 · 승인 기반 화면/입력 세션 열기</button><button data-tpl="photo-studio" class="tpl"><small>TEMPLATE</small>완성형 사진 웹사이트 · NOIR LUMEN 바로 열기</button>');
+  $$('#dashChips [data-tpl]').forEach((b) => (b.onclick = b.dataset.tpl === 'remote' ? () => window.open('remote.html', '_blank', 'noopener,noreferrer') : openPhotoTemplate));
   $$('#dashChips button:not([data-tpl])').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
   $$('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate

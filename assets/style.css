@@ -504,3 +504,6 @@ table.proc{width:100%;border-collapse:collapse;font:11px/1 var(--mono);table-lay
 
 .dash-chips button.tpl{border-color:rgba(0,255,102,.6);background:rgba(0,255,102,.1);color:#eafff1;box-shadow:0 0 16px rgba(0,255,102,.15)}
 .dash-chips button.tpl small{color:var(--neon)}
+.rm-console{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;padding:10px 12px;border:1px solid rgba(0,255,102,.45);border-radius:10px;background:rgba(0,255,102,.06)}
+.rm-console a{text-decoration:none}
+.rm-console span{font:11px var(--mono);color:var(--mut2)}
