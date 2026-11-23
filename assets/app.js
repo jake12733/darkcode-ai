@@ -565,6 +565,15 @@ function composeAnswer(run, sec, snapshotYaml) {
 
 async function execute(prompt, { noCache = false } = {}) {
   if (state.running) return;
+  // STUDIO 명령: /music 대충 쓴 문장 → AI 작곡, /video → 영상 만들기
+  const studioCmd = prompt.match(/^\/(music|음악|노래|song|video|영상|뮤비)(?:\s+([\s\S]*))?$/i);
+  if (studioCmd) {
+    const isVideo = /^(video|영상|뮤비)$/i.test(studioCmd[1]);
+    const q = (studioCmd[2] || '').trim();
+    window.open(isVideo ? 'studio.html?tab=video' : `studio.html${q ? `?q=${encodeURIComponent(q)}&auto=1` : ''}`, '_blank');
+    toast(isVideo ? 'STUDIO 영상 만들기를 열었어요' : 'STUDIO 에서 AI 작곡을 시작합니다');
+    return;
+  }
   let thread = curThread() || newThread();
   const isImage = /^\/(image|img|이미지)\s+/i.test(prompt);
   const mode = isImage ? 'image' : state.mode;
@@ -1733,8 +1742,8 @@ function wire() {
     waterfall = new DarkFX.CodeWaterfall($('#wfCanvas'), () => (artifacts?.files || []).flatMap((f) => ['// ──── ' + f.name + ' ────', ...f.code.split('\n')]).filter((l) => l.trim()).slice(0, 4000));
   }
   $('#dashChips').innerHTML = WELCOME_CHIPS.map(([k, v]) => `<button data-p="${esc(v)}"><small>${k}</small>${esc(v)}</button>`).join('');
-  $('#dashChips').insertAdjacentHTML('afterbegin', '<button data-tpl="remote" class="tpl"><small>REMOTE</small>원격 제어 콘솔 · 승인 기반 화면/입력 세션 열기</button><button data-tpl="photo-studio" class="tpl"><small>TEMPLATE</small>완성형 사진 웹사이트 · NOIR LUMEN 바로 열기</button>');
-  $$('#dashChips [data-tpl]').forEach((b) => (b.onclick = b.dataset.tpl === 'remote' ? () => window.open('remote.html', '_blank', 'noopener,noreferrer') : openPhotoTemplate));
+  $('#dashChips').insertAdjacentHTML('afterbegin', '<button data-tpl="remote" class="tpl"><small>REMOTE</small>원격 제어 콘솔 · 승인 기반 화면/입력 세션 열기</button><button data-tpl="photo-studio" class="tpl"><small>TEMPLATE</small>완성형 사진 웹사이트 · NOIR LUMEN 바로 열기</button><button data-tpl="studio" class="tpl"><small>STUDIO</small>AI 작곡 · 뮤직비디오 제작 · /music 대충 써도 노래가 됨</button>');
+  $$('#dashChips [data-tpl]').forEach((b) => (b.onclick = b.dataset.tpl === 'remote' ? () => window.open('remote.html', '_blank', 'noopener,noreferrer') : b.dataset.tpl === 'studio' ? () => window.open('studio.html', '_blank') : openPhotoTemplate));
   $$('#dashChips button:not([data-tpl])').forEach((c) => (c.onclick = () => { $('#prompt').value = c.dataset.p; autoGrow(); $('#prompt').focus(); $('#sendBtn').disabled = false; }));
   $$('#cvTabs button').forEach((b) => (b.onclick = () => setCenterView(b.dataset.cv)));
   // gate
