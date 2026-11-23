@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DARK CODE · STUDIO — AI 작곡 · 뮤직비디오 제작</title>
+<meta name="description" content="대충 쳐도 AI가 노래를 만들고, 음악에 반응하는 영상을 직접 만들어 내보내는 DARK CODE STUDIO">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="assets/dc-logo-64.png" type="image/png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/studio.css?v=20261123s1">
+</head>
+<body>
+<header class="st-top">
+  <a class="st-brand" href="./" title="DARK CODE 워크스페이스로"><img src="assets/dc-logo-64.png" alt=""><span>DARK <b>CODE</b></span><em>STUDIO</em></a>
+  <nav class="st-tabs" id="tabs" role="tablist">
+    <button data-tab="music" class="on" role="tab">AI 작곡</button>
+    <button data-tab="video" role="tab">영상 만들기</button>
+    <button data-tab="library" role="tab">라이브러리 <span id="libCount"></span></button>
+  </nav>
+  <button class="st-pill" id="corePill" type="button" title="CORE 게이트웨이 연결 상태"><i></i><span>CORE 확인 중</span></button>
+</header>
+
+<!-- ================= 연결 안내 ================= -->
+<section class="st-banner" id="coreBanner" hidden>
+  <div>
+    <b id="bannerTitle">CORE 게이트웨이가 꺼져 있어요</b>
+    <p id="bannerText">AI 작곡은 내 PC에서 도는 darkcode-core + 음악 엔진(ACE-Step)이 처리합니다. 처음 한 번만 아래 순서대로 준비하세요.</p>
+    <ol>
+      <li><a href="https://github.com/jake12733/darkcode-core/archive/refs/heads/main.zip" target="_blank" rel="noopener">darkcode-core 내려받기 (zip)</a> → 압축 풀기</li>
+      <li><b>setup-acestep.bat</b> 실행 (음악 엔진 설치 · 처음 한 번, 10분 이상)</li>
+      <li><b>start-darkcode-core.bat</b> 실행 → 이 화면이 저절로 "연결됨" 으로 바뀝니다</li>
+    </ol>
+    <p class="dim">영상 만들기는 게이트웨이 없이도 됩니다 (내 음악 파일 업로드 + 기본 장면 구성).</p>
+  </div>
+  <button class="st-btn ghost sm" id="bannerClose" type="button">닫기</button>
+</section>
+
+<main class="st-main">
+  <!-- ================= AI 작곡 ================= -->
+  <section class="st-view on" data-view="music">
+    <div class="mk">
+      <div class="mk-head"><h1>대충 써도, <span>노래가 됩니다</span></h1><p>분위기·상황·장르를 한 줄로. 제목·가사·스타일·BPM은 AI가 알아서 정하고 바로 노래로 만들어요.</p></div>
+      <div class="mk-box">
+        <textarea id="mPrompt" rows="3" placeholder="예) 비 오는 날 감성 / 운동할 때 신나는 거 / 새벽 코딩할 때 듣는 로파이 / 카페 브금"></textarea>
+        <div class="mk-chips" id="mChips"></div>
+        <div class="mk-opts">
+          <div class="seg" id="mVocal"><button data-v="vocal" class="on" type="button">보컬</button><button data-v="inst" type="button">인스트(가사 없음)</button></div>
+          <label>길이 <select id="mDur"><option value="30">30초</option><option value="60">1분</option><option value="120" selected>2분</option><option value="180">3분</option></select></label>
+          <label>언어 <select id="mLang"><option value="ko" selected>한국어</option><option value="en">영어</option><option value="ja">일본어</option></select></label>
+          <button class="link" id="mLyricsToggle" type="button">가사 직접 쓰기</button>
+          <span class="grow"></span>
+          <button class="st-btn" id="mCreate" type="button">만들기 <kbd>Ctrl+Enter</kbd></button>
+        </div>
+        <textarea id="mLyrics" rows="6" hidden placeholder="[Verse 1]&#10;가사를 직접 쓰면 그대로 사용합니다&#10;[Chorus]&#10;..."></textarea>
+      </div>
+    </div>
+    <div class="tracks" id="trackList"></div>
+  </section>
+
+  <!-- ================= 영상 만들기 ================= -->
+  <section class="st-view" data-view="video">
+    <div class="vd">
+      <aside class="vd-side">
+        <div class="vd-block">
+          <h3>1. 음악</h3>
+          <select id="vTrack"><option value="">라이브러리에서 선택…</option></select>
+          <label class="up">또는 내 음악 파일 <input type="file" id="vAudioFile" accept="audio/*"></label>
+          <p class="dim" id="vAudioInfo">음악 없이 만들면 장면 길이대로 무음 영상이 됩니다.</p>
+        </div>
+        <div class="vd-block">
+          <h3>2. 화면 · 화질</h3>
+          <div class="seg" id="vFormat"><button data-f="9:16" class="on" type="button">세로 9:16</button><button data-f="16:9" type="button">가로 16:9</button><button data-f="1:1" type="button">정사각</button></div>
+          <label>화질 <select id="vQuality"><option value="720" selected>720p (빠름)</option><option value="1080">1080p</option></select></label>
+        </div>
+        <div class="vd-block">
+          <h3>3. 장면 구성</h3>
+          <textarea id="vPrompt" rows="2" placeholder="대충 써도 돼요. 예) 네온 사이버펑크, 비 오는 도시 / 따뜻한 감성 브이로그"></textarea>
+          <button class="st-btn sm" id="vAuto" type="button">AI 장면 자동 구성</button>
+          <div class="scenes" id="scenes"></div>
+          <button class="st-btn ghost sm" id="vAddScene" type="button">+ 장면 추가</button>
+        </div>
+      </aside>
+      <div class="vd-stage">
+        <div class="stage-wrap" id="stageWrap"><canvas id="stage"></canvas></div>
+        <div class="transport">
+          <button class="st-btn sm" id="vPlay" type="button">재생</button>
+          <button class="st-btn ghost sm" id="vRestart" type="button">처음으로</button>
+          <input type="range" id="vSeek" min="0" max="1000" value="0">
+          <span class="tc" id="vTime">0:00 / 0:00</span>
+          <span class="grow"></span>
+          <button class="st-btn" id="vExport" type="button">영상 내보내기</button>
+        </div>
+        <div class="export" id="exportBox" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 라이브러리 ================= -->
+  <section class="st-view" data-view="library">
+    <h2 class="lib-h">내 음악</h2><div class="lib" id="libTracks"></div>
+    <h2 class="lib-h">내 영상</h2><div class="lib" id="libVideos"></div>
+  </section>
+</main>
+
+<footer class="player" id="player" hidden>
+  <canvas class="pl-cover" id="plCover" width="96" height="96"></canvas>
+  <div class="pl-meta"><b id="plTitle">-</b><span id="plTags"></span></div>
+  <button class="pl-btn" id="plToggle" type="button" aria-label="재생/일시정지">▶</button>
+  <input type="range" id="plSeek" min="0" max="1000" value="0">
+  <span class="tc" id="plTime">0:00 / 0:00</span>
+</footer>
+<audio id="audio" preload="auto"></audio>
+<div class="toast" id="toast"></div>
+<script src="assets/studio.js?v=20261123s1"></script>
+</body>
+</html>
