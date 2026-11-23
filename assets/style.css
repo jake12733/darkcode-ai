@@ -542,3 +542,7 @@ table.proc{width:100%;border-collapse:collapse;font:11px/1 var(--mono);table-lay
 .l6-opts select,.l6-opts input{margin-left:6px;background:#000;border:1px solid var(--line2);border-radius:7px;padding:5px 8px;font:12px var(--mono)}
 .l6-opts input{width:200px}
 .l6-flow{margin:14px 0 0;font:11px/1.6 var(--mono);color:var(--mut2)}
+.l6-ask{margin-top:12px;padding:14px 16px;border:1px solid rgba(250,204,21,.45);border-radius:10px;background:rgba(250,204,21,.05)}
+.l6-ask b{color:#fde68a;font-size:14px}
+.l6-ask p{margin:6px 0 10px;font-size:12.5px;line-height:1.6;color:var(--txt)}
+.l6-ask-btns{display:flex;gap:8px;flex-wrap:wrap}

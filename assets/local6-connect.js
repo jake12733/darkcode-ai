@@ -116,10 +116,13 @@
       '<p class="modal-note" id="l6Reason"></p>' +
       '<div class="l6-actions">' +
       '<button class="btn-neon sm" id="l6Start" type="button" hidden>Ollama 켜기</button>' +
-      '<a class="btn-neon sm" id="l6Connect" href="connect/DARKCODE-Ollama-Connect.bat" download="DARKCODE-Ollama-Connect.bat">원클릭 연결 (Windows)</a>' +
+      '<button class="btn-neon sm" id="l6Connect" type="button">원클릭 연결 (Windows)</button>' +
       '<button class="btn-neon sm" id="l6Copy" type="button" hidden>연결 명령어 복사</button>' +
       '<button class="btn-ghost sm" id="l6Recheck" type="button">다시 확인</button>' +
       '</div>' +
+      '<div class="l6-ask" id="l6Ask" hidden><b>이 PC에서 Ollama를 찾지 못했어요</b>' +
+      '<p>Ollama를 다운로드해서 자동으로 설치할까요? 설치 파일 약 2GB(Mac은 약 230MB), 설치 후 AI 모델(약 5GB)을 한 번 더 받습니다. 이미 설치돼 있다면 설치는 건너뛰고 켜서 연결만 합니다.</p>' +
+      '<div class="l6-ask-btns"><button class="btn-neon sm" id="l6AskYes" type="button">예, 설치할게요</button><button class="btn-ghost sm" id="l6AskNo" type="button">아니요</button></div></div>' +
       '<p class="l6-sub" id="l6Sub"></p>' +
       '<details class="l6-more" id="l6More"><summary>파일 실행이 막히면 · 다른 방법</summary>' +
       '<p id="l6AltText"></p><div class="l6-cmd"><code id="l6Cmd"></code><button class="btn-sm" id="l6CmdCopy" type="button">복사</button></div><p class="l6-note" id="l6Note"></p></details>' +
@@ -138,11 +141,10 @@
       window.location.href = 'darkcode-ollama://start';
       startPolling();
     });
-    $('l6Connect').addEventListener('click', function () { $('l6Live').textContent = '실행 기다리는 중'; startPolling(); });
-    $('l6Copy').addEventListener('click', function () {
-      navigator.clipboard.writeText(CMD_UNIX).then(function () { $('l6Copy').textContent = '복사됨! 터미널에 붙여넣으세요'; setTimeout(function () { $('l6Copy').textContent = '연결 명령어 복사'; }, 2500); });
-      $('l6Live').textContent = '실행 기다리는 중'; startPolling();
-    });
+    $('l6Connect').addEventListener('click', connectFlow);
+    $('l6Copy').addEventListener('click', connectFlow);
+    $('l6AskYes').addEventListener('click', function () { $('l6Ask').hidden = true; runConnector('install'); });
+    $('l6AskNo').addEventListener('click', function () { $('l6Ask').hidden = true; $('l6Sub').textContent = '설치를 취소했어요. 필요할 때 [원클릭 연결]을 다시 눌러 주세요.'; });
     $('l6CmdCopy').addEventListener('click', function () { navigator.clipboard.writeText($('l6Cmd').textContent).then(function () { $('l6CmdCopy').textContent = '복사됨'; setTimeout(function () { $('l6CmdCopy').textContent = '복사'; }, 1200); }); });
     var mr = $('l6MaxRev'); mr.value = String(maxRevisions());
     mr.addEventListener('change', function () { localStorage.setItem(LS_MAXREV, mr.value); });
@@ -191,6 +193,7 @@
     if (OS === 'win') $('l6Connect').hidden = !showActions;
     else if (OS !== 'mobile') $('l6Copy').hidden = !showActions;
     $('l6More').hidden = !showActions || OS === 'mobile';
+    if (!s.ok && (pollTimer || ($('l6Ask') && !$('l6Ask').hidden))) { /* 진행 중 안내 유지 */ } else
     $('l6Sub').textContent = s.ok ? '' : OS === 'mobile' ? 'Ollama는 PC에서 실행됩니다. Ollama가 설치된 PC 브라우저에서 열어 주세요.'
       : OS === 'win' ? '받은 파일을 더블클릭하면 설치 확인, 접속 허용, 재시작, 모델 준비까지 자동으로 끝나고 이 창이 저절로 바뀝니다.'
       : '터미널을 열고 붙여넣기 → Enter. 연결되면 이 창이 저절로 바뀝니다.';
@@ -201,6 +204,82 @@
       var known = s.ok || s.state === 'models';
       return '<span class="l6-chip ' + (known ? (have ? 'ok' : 'miss') : '') + '">' + m + '</span>';
     }).join('');
+  }
+
+  /* ---------- 원클릭 연결 흐름 ---------- */
+  function setLive(t) { if ($('l6Live')) $('l6Live').textContent = t; }
+  function setSub(t) { if ($('l6Sub')) $('l6Sub').textContent = t; }
+
+  function downloadConnector() {
+    var a = document.createElement('a');
+    a.href = 'connect/DARKCODE-Ollama-Connect.bat';
+    a.download = 'DARKCODE-Ollama-Connect.bat';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // why: 'install' (Ollama 없음 → 설치 포함) | 'setup' (설치돼 있음 → 허용 설정·모델만)
+  function runConnector(why) {
+    if (OS === 'win') {
+      downloadConnector();
+      setSub(why === 'install'
+        ? '연결 파일을 받았어요. 실행하면 Ollama 설치 → 접속 허용 → 모델 준비까지 자동으로 진행되고, 끝나면 이 창이 저절로 "연결됨"으로 바뀝니다. (브라우저가 파일 보관을 물으면 [유지], "Windows의 PC 보호"가 뜨면 [추가 정보 → 실행])'
+        : 'Ollama가 설치돼 있어요. 받은 파일을 실행하면 설치는 건너뛰고 접속 허용·모델 준비만 자동으로 진행됩니다.');
+    } else if (OS !== 'mobile') {
+      navigator.clipboard.writeText(CMD_UNIX).catch(function () {});
+      setSub((why === 'install' ? '명령어를 복사했어요. 터미널에 붙여넣고 Enter → Ollama 설치부터 연결까지 자동 진행됩니다.' : '명령어를 복사했어요. 터미널에 붙여넣고 Enter → 접속 허용·모델 준비만 진행됩니다.'));
+    }
+    setLive('실행 기다리는 중');
+    startPolling();
+  }
+
+  function tryStartInstalled() {
+    // 이전에 원클릭 연결을 실행한 PC면 darkcode-ollama:// 로 Ollama를 켜 본다 (최대 10초)
+    return new Promise(function (resolve) {
+      window.location.href = 'darkcode-ollama://start';
+      var n = 0;
+      var t = setInterval(function () {
+        n++;
+        check().then(function (s) {
+          if (s.ok || s.state === 'models' || s.state === 'blocked') { clearInterval(t); resolve(s); }
+          else if (n >= 5) { clearInterval(t); resolve(s); }
+        });
+      }, 2000);
+    });
+  }
+
+  function connectFlow() {
+    if ($('l6Ask')) $('l6Ask').hidden = true;
+    setLive('확인 중...');
+    setSub('이 PC의 Ollama를 확인하고 있어요...');
+    check().then(function (s) {
+      if (s.ok) return done();
+      if (s.state === 'blocked' || s.state === 'models') return runConnector('setup');
+      if (s.state === 'permission') { setLive('브라우저 허용 대기'); setSub('주소창 아래 "로컬 네트워크 기기 접근" 창에서 [허용]을 눌러 주세요.'); startPolling(); return; }
+      // off: 꺼져 있거나 설치 안 됨
+      var installed = localStorage.getItem(LS_CONNECTOR) === '1';
+      if (installed && OS === 'win') {
+        setLive('Ollama 켜는 중...');
+        setSub('설치된 Ollama를 켜고 있어요. (브라우저가 앱 열기를 물으면 [열기])');
+        return tryStartInstalled().then(function (s2) {
+          if (s2.ok) return done();
+          if (s2.state === 'blocked' || s2.state === 'models') return runConnector('setup');
+          askInstall();
+        });
+      }
+      askInstall();
+    });
+    function done() {
+      setLive('연결됨');
+      setSub('이미 연결돼 있어요. 바로 시작합니다.');
+      setTimeout(function () { var d = $('l6dlg'); if (d && d.open) d.close(); }, 900);
+    }
+  }
+
+  function askInstall() {
+    if (OS === 'mobile') { setSub('Ollama는 PC에서 실행됩니다. Ollama가 설치된 PC 브라우저에서 열어 주세요.'); return; }
+    setLive('설치 확인 필요');
+    setSub('');
+    $('l6Ask').hidden = false;
   }
 
   function startPolling() {
@@ -246,5 +325,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 
-  window.DCLocal6 = { check: check, open: open, waitConnected: waitConnected, host: host, maxRevisions: maxRevisions, state: function () { return last; } };
+  window.DCLocal6 = { check: check, open: open, waitConnected: waitConnected, host: host, maxRevisions: maxRevisions, connect: function () { open(); connectFlow(); }, state: function () { return last; } };
 })();
