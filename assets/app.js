@@ -497,6 +497,7 @@ const STAGES_COUNCIL = ['CACHE', 'CONTEXT', 'STRATEGIST', 'IMPLEMENTER', 'CRITIC
 const STAGES_FAST = ['CACHE', 'CONTEXT', 'ROUTE', 'GENERATE', 'VERIFY', 'GATE', 'RENDER'];
 const STAGES_IMAGE = ['CACHE', 'PROMPT', 'IMAGE', 'RENDER'];
 const STAGES_LOCAL6 = ['CACHE', 'ROUTER', 'WORKER', 'CRITIC', 'REVISE', 'RENDER'];
+const STAGES_CORE = ['CACHE', 'CONTEXT', 'ROUTE', 'STRATEGIST', 'IMPLEMENTER', 'CRITIC', 'GATE', 'RENDER'];
 
 async function buildContext(thread, run) {
   const msgs = thread.messages.filter((m) => !m.pending).map((m) => ({ role: m.role, content: m.role === 'assistant' ? (m.modelText || m.content) : m.content }));
@@ -534,8 +535,9 @@ function routeSummary(run) {
   const path = [];
   path.push(run.cacheHit ? '캐시 HIT (TTL 86400s)' : '캐시 MISS');
   if (run.compressed) path.push('컨텍스트 압축');
+  if (run.core) path.push(`CORE 게이트웨이 (${run.calls.map((c) => c.short).join(' → ')})`);
   if (run.local6) path.push(`로컬 6-에이전트 (${run.calls.map((c) => c.short).join(' → ')})`);
-  const free = run.calls.filter((c) => !['claude', 'ollama', 'local6'].includes(c.pid));
+  const free = run.calls.filter((c) => !['claude', 'ollama', 'local6', 'core'].includes(c.pid));
   if (free.length) path.push(`무료 풀 순환 (${[...new Set(free.map((c) => c.short))].join(' → ')})`);
   if (run.calls.some((c) => c.pid === 'ollama')) path.push('로컬 Ollama 폴백');
   const synth = run.calls.find((c) => c.label === 'synth');
@@ -554,7 +556,7 @@ function composeAnswer(run, sec, snapshotYaml) {
   let md = `## [실시간 실행 로그 / 코드 스트림 요약]\n\`\`\`log\n${logLines.join('\n')}\n\`\`\`\n\n`;
   md += `## [라우팅 및 합의 요약]\n- **실행 경로**: ${rs.path}\n`;
   if (rs.used.length) md += `- **호출**: ${rs.used.join(' · ')}\n`;
-  md += `- **소요**: ${(run.ms / 1000).toFixed(1)}s · 모드 ${({ council: '멀티 AI 상의', claude: 'Claude Final Pass', image: '이미지 파이프라인', fast: '빠른 실행', local6: '로컬 6-에이전트 (Ollama)' })[run.mode]}\n`;
+  md += `- **소요**: ${(run.ms / 1000).toFixed(1)}s · 모드 ${({ council: '멀티 AI 상의', claude: 'Claude Final Pass', image: '이미지 파이프라인', fast: '빠른 실행', local6: '로컬 6-에이전트 (Ollama)', core: 'CORE 게이트웨이' })[run.mode]}\n`;
   if (sec.consensus) md += `\n${sec.consensus}\n`;
   md += `\n## [자율 실행 산출물]\n${sec.deliverable || '(산출물 없음)'}\n\n`;
   md += `## [세션 상태 스냅샷 (State Snapshot)]\n\`\`\`yaml\n${snapshotYaml}\n\`\`\`\n`;
@@ -595,13 +597,14 @@ async function execute(prompt, { noCache = false } = {}) {
       run.log('cache  MISS', 't'); TEL()?.cache(false);
       if (mode === 'image') modelText = await runImage(prompt, run);
       else if (mode === 'local6') modelText = await runLocal6(prompt, run, thread);
+      else if (mode === 'core') modelText = await runCore(prompt, run, thread);
       else {
         run.stage('CONTEXT');
         const ctx = await buildContext({ ...thread, messages: thread.messages.slice(0, -1) }, run);
         if (ctx.compressed) { run.compressed = true; const real = curThread(); if (real) real.summary = thread.summary; }
         modelText = mode === 'fast' ? await runFast(prompt, ctx.messages, run, thread) : await runCouncil(prompt, ctx.messages, run, thread, mode === 'claude');
       }
-      if (mode !== 'image') modelText = await completeHtml(run, prompt, modelText);
+      if (mode !== 'image' && mode !== 'core') modelText = await completeHtml(run, prompt, modelText);
       cachePut(key, { modelText, calls: run.calls });
       run.log(`cache  store key=${key}`, 't');
     }
@@ -610,7 +613,7 @@ async function execute(prompt, { noCache = false } = {}) {
     snap = parseSnapshot(sec.snapshot, prompt);
     run.ms = performance.now() - run.t0;
     const answer = composeAnswer(run, sec, snap);
-    const msg = { role: 'assistant', content: answer, modelText, snapshot: snap, t: Date.now(), meta: { ms: run.ms, route: routeSummary(run).path, lines: run.lines, mode, cached: !!run.cacheHit, local6State: run.local6State || null } };
+    const msg = { role: 'assistant', content: answer, modelText, snapshot: snap, t: Date.now(), meta: { ms: run.ms, route: routeSummary(run).path, lines: run.lines, mode, cached: !!run.cacheHit, local6State: run.local6State || null, coreState: run.coreState || null } };
     thread = curThread() || thread;
     thread.messages.push(msg);
     thread.artifacts = buildArtifacts(sec, snap, thread, run);
@@ -798,7 +801,7 @@ function previewOverlay() {
 function previewLoading(run, prompt, mode) {
   const ov = previewOverlay();
   ov.hidden = false; ov.classList.remove('err');
-  $('.pg-title', ov).textContent = ({ local6: '로컬 6-에이전트가 만드는 중', image: '이미지 생성 중', fast: '빠르게 만드는 중', claude: 'Claude Final Pass 진행 중' })[mode] || '멀티 AI가 만드는 중';
+  $('.pg-title', ov).textContent = ({ core: 'CORE 게이트웨이가 만드는 중', local6: '로컬 6-에이전트가 만드는 중', image: '이미지 생성 중', fast: '빠르게 만드는 중', claude: 'Claude Final Pass 진행 중' })[mode] || '멀티 AI가 만드는 중';
   $('.pg-q', ov).textContent = prompt;
   $('.pg-stage', ov).textContent = '준비 중...';
   $('.pg-tail', ov).textContent = '';
@@ -925,6 +928,64 @@ async function runImage(prompt, run) {
   run.log(`done   image ${Math.round(performance.now() - t0)}ms · ${Math.round(blob.size / 1024)}KB`, 'ok');
   run.calls.push({ label: 'image', provider: 'Pollinations', short: 'POLLI', pid: 'pollinations', model: 'flux' });
   return `## 합의 요약\n- 요청을 영문 이미지 프롬프트로 최적화한 뒤 무료 이미지 파이프라인으로 생성했습니다.\n- 같은 프롬프트에 seed만 바꾸면 변형을 만들 수 있습니다.\n## 자율 실행 산출물\n![generated](${url})\n\n**프롬프트(EN)**\n\`\`\`text\n${en}\n\`\`\`\n\n- 원본: [이미지 새 창으로 열기](${url})\n- 변형: seed 값을 바꿔 재생성 · 비율은 width/height 파라미터로 조정\n## 세션 상태 스냅샷\n\`\`\`yaml\nuser_goal: "${raw.replace(/"/g, "'").slice(0, 80)}"\ncompleted_steps: ["프롬프트 최적화", "이미지 생성 (seed ${seed})"]\nactive_artifacts: ["generated image 1280x768"]\npending_tasks: ["필요 시 변형/업스케일"]\nconstraints: ["무료 파이프라인 · 상업 이용 전 라이선스 확인"]\n\`\`\``;
+}
+
+/* ---------- CORE 게이트웨이 (darkcode-core: 역할별 엔진 라우팅 + 검수 루프 + 통합 세션) ---------- */
+const CORE_STAGE = { cache: 'CACHE', context: 'CONTEXT', route: 'ROUTE', strategist: 'STRATEGIST', implementer: 'IMPLEMENTER', revise: 'IMPLEMENTER', critic: 'CRITIC', verify: 'CRITIC', gate: 'GATE', render: 'RENDER' };
+async function runCore(prompt, run, thread) {
+  const CORE = window.DCCore;
+  if (!CORE) throw new Error('CORE 연결 모듈을 불러오지 못했습니다. 새로고침해 주세요.');
+  run.core = true;
+  run.log('stage  CORE GATEWAY · 분류 → 역할별 엔진 → 검수 루프 (darkcode-core)', 'k');
+  const c = await CORE.check();
+  if (!c.ok) {
+    run.log('core   게이트웨이 꺼짐 → 연결 안내 창 표시, 켜지면 자동으로 이어서 실행', 'warn');
+    CORE.open();
+    await CORE.waitConnected(run.signal);
+    run.log('core   게이트웨이 연결됨', 'ok');
+  }
+  const LVL = { error: 'err', warn: 'warn', ok: 'ok', route: 'route', done: 'ok', info: 't', debug: 't' };
+  let res;
+  try {
+    res = await CORE.run(prompt, {
+      sessionId: thread.coreSession, signal: run.signal,
+      onEvent: (type, d) => {
+        if (type === 'token' || type === 'thinking' || type === 'plan') { run.rain(d.text || ''); return; }
+        if (type === 'stage' && d.status === 'start' && CORE_STAGE[d.name]) run.stage(CORE_STAGE[d.name]);
+        else if (type === 'log') run.log(String(d.msg).replace(/^(\S+)\s/, (m, w) => (w.length <= 6 ? w.padEnd(6) + ' ' : m)), LVL[d.level] || '');
+        else if (type === 'route') run.calls.push({ label: d.role, provider: d.engine, short: `${d.engine}:${d.model}`.toUpperCase(), pid: 'core', model: d.model });
+        else if (type === 'run' && d.sessionId) thread.coreSession = d.sessionId;
+      },
+    });
+  } catch (e) {
+    if (run.signal.aborted || e.name === 'AbortError') { const ab = new Error('사용자 중단'); ab.kind = 'abort'; throw ab; }
+    throw e;
+  }
+  thread.coreSession = res.sessionId;
+  const real = curThread(); if (real && real !== thread) real.coreSession = res.sessionId;
+  run.coreState = res.snapshot;
+  const rounds = (res.rounds || []).map((x) => `  - ${x.round}차 ${x.verdict} (${x.score}/10 · ${x.source})${x.fixes && x.fixes.length ? ': ' + x.fixes.join(' / ') : ''}`).join('\n');
+  const q = (s) => String(s || '').replace(/"/g, "'");
+  return `## [라우팅 및 합의 요약]
+- **CORE 분류**: ${res.label || res.category} · 파이프라인 ${res.pipeline}${res.cached ? ' · 캐시 HIT' : ''}
+- **검수 루프**: 검수 ${(res.rounds || []).length}회 · 자동 수정 ${res.revisions || 0}회${res.gate && res.gate.escalated ? ' · 상위 엔진 승격' : ''}
+${rounds}${res.issues && res.issues.length ? `\n- **남은 정적 검사 이슈**: ${res.issues.join(' / ')}` : ''}
+
+## [자율 실행 산출물]
+${res.final}
+
+## [세션 상태 스냅샷 (State Snapshot)]
+\`\`\`yaml
+user_goal: "${q(prompt.slice(0, 80))}"
+engine: darkcode-core
+category: ${res.category}
+core_session: ${res.sessionId}
+critic_rounds: ${(res.rounds || []).length}
+revisions: ${res.revisions || 0}
+state_compression: |
+${String((res.snapshot && res.snapshot.text) || '').split('\n').map((l) => '  ' + l).join('\n')}
+\`\`\`
+`;
 }
 
 /* ---------- LOCAL 6-AGENT (Ollama: ai-router → expert → ai-critic loop) ---------- */
@@ -1124,7 +1185,7 @@ function persistArtifacts() { const t = curThread(); if (t && artifacts) { t.art
 /* ================= RUN UI ================= */
 let centerRain;
 function createRunUI(mode) {
-  const stages = mode === 'council' || mode === 'claude' ? STAGES_COUNCIL : mode === 'image' ? STAGES_IMAGE : mode === 'local6' ? STAGES_LOCAL6 : STAGES_FAST;
+  const stages = mode === 'council' || mode === 'claude' ? STAGES_COUNCIL : mode === 'image' ? STAGES_IMAGE : mode === 'local6' ? STAGES_LOCAL6 : mode === 'core' ? STAGES_CORE : STAGES_FAST;
   const el = document.createElement('div'); el.className = 'msg ai';
   el.innerHTML = `<div class="who"><i>AI</i>CORE ORCHESTRATOR <span class="meta">· executing</span></div>
   <div class="run"><div class="run-head"><span class="spin"></span><span class="ttl">LIVE CODE STREAM</span><span class="tm">0.0s</span></div>
@@ -1276,7 +1337,7 @@ function renderStatus() {
   const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
   const total = Object.values(prov).filter((p) => !p.primary && !p.local).length;
   $('#statusLine').innerHTML = `<span>POOL <b>${ready}/${total}</b> ready</span><span>LOCAL <b>${prov.ollama.enabled ? 'ollama on' : 'off'}</b></span><span>CLAUDE <b>${(() => { const c = claudeUse(); return `ZERO-DEFAULT · ${(c.in + c.out).toLocaleString()} tok · 승격 ${c.calls}회`; })()}</b>${usable(prov.claude) ? '' : ' (키 없음)'}</span><span>CTX <b>~${tok.toLocaleString()}</b>/${opts.compressAt.toLocaleString()} tok${t?.summary ? ' · 압축됨' : ''}</span><span>CACHE <b>${LS.get('cidx', []).length}</b> · TTL ${opts.ttl}s</span>`;
-  $('#modeBadge').textContent = ({ council: 'COUNCIL · ZERO-CLAUDE', fast: 'FAST · ZERO-CLAUDE', claude: 'CLAUDE FINAL PASS', local6: 'LOCAL 6-AGENT · OLLAMA' })[state.mode];
+  $('#modeBadge').textContent = ({ council: 'COUNCIL · ZERO-CLAUDE', fast: 'FAST · ZERO-CLAUDE', claude: 'CLAUDE FINAL PASS', local6: 'LOCAL 6-AGENT · OLLAMA', core: 'CORE · GATEWAY' })[state.mode];
 }
 
 /* ================= SETTINGS ================= */
@@ -1752,6 +1813,7 @@ function wire() {
   $$('#modeSeg button').forEach((b) => (b.onclick = () => {
     state.mode = b.dataset.mode; $$('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b)); renderStatus();
     if (state.mode === 'local6' && window.DCLocal6) DCLocal6.check().then((s) => { if (!s.ok) DCLocal6.open(); else toast('로컬 6-에이전트 · Ollama 모델 6/6 연결됨'); });
+    if (state.mode === 'core' && window.DCCore) DCCore.check().then((s) => { if (!s.ok) DCCore.open(); else toast(`CORE 게이트웨이 연결됨 · ${s.profile} 프로필`); });
   }));
   $('#routeSel').onchange = (e) => { state.route = e.target.value; toast(state.route === 'auto' ? 'AUTO 라운드로빈' : `${prov[state.route].name} 고정 (실패 시 로컬/Claude 폴백)`); };
   $('#newBtn').onclick = () => { if (state.running) return toast('실행 중입니다'); state.cur = null; renderThreads(); renderStream(); applyArtifacts(null); renderStatus(); setCenterView('dash'); $('#app').classList.remove('show-side'); ta.focus(); };
