@@ -191,7 +191,7 @@
       const wave = $('.trk-wave', el); wave._peaks = t.peaks; requestAnimationFrame(() => drawWave(wave, t.peaks, 0));
       wave.onclick = (e) => { if (nowId !== t.id) { play(t.id).then(() => seekWave(e, wave)); } else seekWave(e, wave); };
       const a = document.createElement('a'); a.textContent = '다운로드'; a.href = urlFor(t); a.download = `${t.title}.mp3`; acts.append(a);
-      btn('영상 만들기', () => { setTab('video'); $('#vTrack').value = t.id; loadVideoAudio(t.id); });
+      btn('영상 만들기', async () => { setTab('video'); await fillTrackSelect(); $('#vTrack').value = t.id; loadVideoAudio(t.id); });
     }
     if (t.song?.lyrics || t.song?.caption) btn('가사·스타일', () => { const pre = $('.trk-lyrics', el); if (pre) return pre.remove(); const p = document.createElement('pre'); p.className = 'trk-lyrics'; p.textContent = `스타일: ${t.song.caption || ''}\n\n${t.song.lyrics || '(인스트)'}`; el.append(p); });
     if (t.state === 'plan' || t.state === 'ready') btn('Suno로 보내기', async () => {
