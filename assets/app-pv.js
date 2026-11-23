@@ -418,7 +418,7 @@ const SYSTEM_CORE = `당신은 DARK CODE의 코어 오케스트레이터이자 �
 - 한국어로, 군더더기 없이 결론부터. 코드는 생략("...", "나머지 동일") 없이 바로 실행 가능한 완성본을 언어가 표시된 코드 블록에 담습니다.
 - 웹 페이지/UI 요청이면 CSS·JS를 내장한 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)을 반드시 포함하십시오. 플랫폼의 우측 미리보기 패널에 바로 렌더됩니다. 웹 산출물 규칙(반드시 준수):
   1) 빌드·외부 파일 없이 미리보기에서 즉시 렌더되는 완결된 단일 HTML/CSS/JS. 라이브러리·폰트도 없이 동작하게(시스템 폰트 스택).
-  2) 사진·영상은 실사 소재로 자동 삽입됩니다. 외부 이미지·영상 URL을 직접 쓰지 말고 아래 표식만 쓰십시오 (플랫폼이 Pexels·Unsplash·Openverse 등의 실사 사진/영상으로 바꿔 넣고 출처를 표기합니다): 사진 <img data-dc-img="영문 검색어" alt="한국어 설명">, 히어로·섹션 배경 사진은 요소에 data-dc-bg="영문 검색어", 배경 영상은 <video data-dc-video="영문 검색어" autoplay muted loop playsinline></video>. 검색어는 장면을 구체적으로 쓰고(예: "korean dentist explaining to patient in bright modern clinic"), 인물은 국적 지정이 없으면 korean 을 넣고, 같은 사람이 반복되지 않게 장면마다 다른 검색어를 쓰십시오. 사용자가 일러스트·애니메이션을 요청하지 않았다면 실사 기준입니다. 로고·아이콘·차트는 인라인 SVG로 그리고, 표식 자리에는 aspect-ratio·object-fit:cover·배경색을 지정해 로딩 전에도 레이아웃이 깨지지 않게 하십시오.
+  2) 사진·영상은 실사 소재로 자동 삽입됩니다. 외부 이미지·영상 URL을 직접 쓰지 말고 아래 표식만 쓰십시오 (플랫폼이 Pexels·Unsplash·Wikimedia Commons·Openverse 등의 실사 사진/영상으로 바꿔 넣고 출처를 표기합니다): 사진 <img data-dc-img="영문 검색어" alt="한국어 설명">, 히어로·섹션 배경 사진은 요소에 data-dc-bg="영문 검색어", 배경 영상은 <video data-dc-video="영문 검색어" autoplay muted loop playsinline></video>. 검색어는 장면을 구체적으로 쓰고(예: "korean dentist explaining to patient in bright modern clinic"), 인물은 국적 지정이 없으면 korean 을 넣고, 같은 사람이 반복되지 않게 장면마다 다른 검색어를 쓰십시오. 사용자가 일러스트·애니메이션을 요청하지 않았다면 실사 기준입니다. 로고·아이콘·차트는 인라인 SVG로 그리고, 표식 자리에는 aspect-ratio·object-fit:cover·배경색을 지정해 로딩 전에도 레이아웃이 깨지지 않게 하십시오.
   3) 모든 버튼·탭·필터·모달·폼은 실제 상태 변화와 시각 피드백을 가지며, 주요 데이터는 localStorage에 저장·복원합니다. localStorage가 막힌 샌드박스(미리보기)에서는 조용히 메모리 저장으로 대체하고 오류 배너를 띄우지 마십시오. 폼은 필수값 검증·완료 피드백을 포함합니다.
   4) 원격 접속·제어 기능을 넣을 때는 대상자가 명시적으로 수락(ACCEPT)한 경우에만 활성화되는 상태 머신(PENDING → ACCEPTED → CONNECTED / TERMINATED, 만료 타이머, 거절·종료 시 즉시 해제·기록 저장)로 만들고, 실행 로그는 브라우저가 실제로 할 수 있는 작업만 표시합니다(가짜 바이러스/PC 스캔 문구 금지).
   5) 외부 웹사이트를 iframe으로 삽입하지 말고 window.open(url, '_blank', 'noopener,noreferrer')로 열며, 상단 네비 스무스 스크롤·모바일 메뉴·360px 폭까지 가로 넘침/요소 겹침 없는 반응형을 완성합니다.
@@ -1545,7 +1545,7 @@ function renderSettings() {
   const pool = Object.values(prov).filter((p) => !p.primary && !p.local);
   body.innerHTML = `
     <div class="set-sec"><h4>무료 클라우드 풀 · WEIGHTED ROUND-ROBIN</h4><p>키는 이 브라우저 localStorage에만 저장되고 각 프로바이더로 직접 전송됩니다. 429 → ${opts.cooldown429}s 쿨다운, 5xx/타임아웃 → 즉시 다음 프로바이더로 failover.</p>${rows(pool)}</div>
-    <div class="set-sec"><h4>미디어 · 나레이션 (실사 사진·영상 자동 삽입)</h4><p>홈페이지를 만들면 실사 사진·영상을 자동으로 넣고, STUDIO 홍보영상에 나레이션을 붙입니다. 키가 없으면 Openverse(CC 라이선스 사진, 출처 자동 표기)만 씁니다. 전부 무료 가입으로 받는 키이고 이 브라우저 암호화 금고에만 저장됩니다. 나레이션은 위 Gemini 키(무료 등급)를 먼저 씁니다.</p>
+    <div class="set-sec"><h4>미디어 · 나레이션 (실사 사진·영상 자동 삽입)</h4><p>홈페이지를 만들면 실사 사진·영상을 자동으로 넣고, STUDIO 홍보영상에 나레이션을 붙입니다. 키가 없으면 Wikimedia Commons·Openverse(CC 라이선스 실사 사진, 출처 자동 표기)를 씁니다. 전부 무료 가입으로 받는 키이고 이 브라우저 암호화 금고에만 저장됩니다. 나레이션은 위 Gemini 키(무료 등급)를 먼저 씁니다.</p>
       ${MEDIA_KEYS.map((m) => `<div class="orow"><span>${esc(m.name)} <small style="color:var(--mut)">${esc(m.note)}</small></span><input type="password" data-mkey="${m.id}" placeholder="${mediaKeys[m.id] ? '저장됨 · …' + esc(mediaKeys[m.id].slice(-4)) + ' (비워두면 유지)' : esc(m.ph)}" autocomplete="off" spellcheck="false"></div>`).join('')}
       <div class="orow"><span>Azure 지역</span><input type="text" id="optAzureRegion" value="${esc(opts.azureRegion || 'koreacentral')}" spellcheck="false"></div>
       <div class="orow"><span>현재 사용 경로</span><span style="font:12px var(--mono);color:var(--g1)">${esc(mediaStatusText())}</span></div>

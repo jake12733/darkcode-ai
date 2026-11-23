@@ -1,6 +1,6 @@
 /* DARK CODE · 미디어 엔진 (window.DCMedia)
  * 실사 사진·영상 자동 삽입, AI 실사 이미지, 나레이션(TTS) 연결부
- *  사진: Pexels → Unsplash (무료 키) → Openverse (키 없음 · CC 라이선스 · 출처 자동 표기)
+ *  사진: Pexels → Unsplash (무료 키) → Wikimedia Commons → Openverse (키 없음 · CC 라이선스 · 출처 자동 표기)
  *  영상: Pexels → Pixabay (무료 키)
  *  AI 실사 이미지: Pollinations (pollen 키) → 키가 없으면 Classic API 재시도
  *  나레이션: Gemini TTS (무료 등급 키) → Azure Speech (F0 키)
@@ -15,11 +15,12 @@
   const PEOPLE = /\b(people|person|man|men|woman|women|girl|boy|doctor|dentist|nurse|patient|staff|team|family|couple|child|children|kid|student|teacher|customer|client|worker|surgeon|therapist|physician|receptionist|chef|barista|trainer|portrait|smiling|face|businessman|businesswoman|employee|senior|elderly|mother|father|baby)\b/i;
   const NATION = /\b(korean|asian|japanese|chinese|american|european|african|indian|caucasian|black|white|latino|hispanic|western|arab)\b/i;
   const STYLE = /(anime|illustration|cartoon|watercolor|vector|flat design|3d render|pixel art|sketch|line art|clay|일러스트|애니|만화|그림체|수채화|픽셀|캐릭터)/i;
+  const ART = /(painting|google art project|museum|drawing|engraving|illustration|lithograph|etching|\bmap\b|logo|diagram|poster|stamp|coin|banknote|manuscript|sketch|watercolou?r|fresco|statue|sculpture|\b1[5-9]\d\d\b)/i;
 
   const setKeys = (k) => { Object.keys(k || {}).forEach((n) => { if (n in KEYS && typeof k[n] === 'string') KEYS[n] = k[n].trim(); }); };
   const has = (n) => Boolean(KEYS[n]);
   const status = () => ({
-    photo: ['pexels', 'unsplash'].filter(has).concat('openverse'),
+    photo: ['pexels', 'unsplash'].filter(has).concat('wikimedia', 'openverse'),
     video: ['pexels', 'pixabay'].filter(has),
     ai: has('pollinations') ? 'pollinations' : 'classic',
     tts: ['gemini', 'azure'].filter(has),
@@ -51,24 +52,50 @@
     const j = await getJSON(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(q)}&per_page=20&orientation=${ORI[o].unsplash}&content_filter=high`, { headers: { Authorization: `Client-ID ${KEYS.unsplash}` }, signal });
     return (j.results || []).filter((p) => okText(p.alt_description)).map((p) => ({ id: 'unsplash:' + p.id, url: `${p.urls.raw}&w=1800&q=80&fm=jpg&fit=crop`, small: p.urls.regular, w: p.width, h: p.height, alt: p.alt_description || q, credit: { source: 'Unsplash', author: (p.user && p.user.name) || '', link: `${p.links.html}?utm_source=darkcode_ai&utm_medium=referral`, license: 'Unsplash License' } }));
   }
-  async function openversePhotos(q, o, signal) {
-    const url = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&license_type=commercial&category=photograph&mature=false&page_size=20&aspect_ratio=${ORI[o].ov}`;
-    const j = await getJSON(url, { signal });
-    return (j.results || [])
-      .filter((r) => r.url && okText(r.title) && okText((r.tags || []).map((t) => t.name).join(' ')) && (r.width || 0) >= 640)
-      .map((r) => ({ id: 'ov:' + r.id, url: r.url, small: r.thumbnail || r.url, w: r.width, h: r.height, alt: r.title || q, credit: { source: 'Openverse', author: r.creator || '', link: r.foreign_landing_url || r.url, license: `CC ${String(r.license || '').toUpperCase()} ${r.license_version || ''}`.trim(), title: r.title || '' } }));
+  // 방향이 맞는 사진을 앞으로 (없으면 나머지도 사용)
+  const fits = (x, o) => { const r = (x.w || 1) / (x.h || 1); return o === 'portrait' ? r < 0.87 : o === 'square' ? r >= 0.87 && r <= 1.15 : r > 1.15; };
+  const byOrientation = (list, o) => list.filter((x) => fits(x, o)).concat(list.filter((x) => !fits(x, o)));
+  const strip = (h) => String(h || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  async function wikimediaPhotos(q, o, signal) {
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(q + ' filetype:bitmap')}&gsrnamespace=6&gsrlimit=30&prop=imageinfo&iiprop=url|size|extmetadata&iiurlwidth=1600&iiextmetadatafilter=LicenseShortName|Artist`;
+    const j = await getJSON(url, { signal }, 15000);
+    const pages = Object.values((j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
+    const list = pages.map((p) => {
+      const ii = p.imageinfo && p.imageinfo[0];
+      if (!ii) return null;
+      const em = ii.extmetadata || {};
+      const lic = strip(em.LicenseShortName && em.LicenseShortName.value);
+      const title = String(p.title || '').replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '');
+      if ((ii.width || 0) < 800 || !/(cc|public domain|pd)/i.test(lic) || /\b(nc|nd)\b/i.test(lic) || !okText(title) || ART.test(title)) return null;
+      return { id: 'wm:' + p.pageid, url: ii.thumburl || ii.url, small: ii.thumburl || ii.url, w: ii.width, h: ii.height, alt: title, credit: { source: 'Wikimedia Commons', author: strip(em.Artist && em.Artist.value).slice(0, 60), link: ii.descriptionurl || ii.url, license: lic, title } };
+    }).filter(Boolean);
+    return byOrientation(list, o);
   }
-  function variants(q) {
+  // Openverse 는 느리고 동시 요청을 막는 편이라 한 번에 하나씩 보낸다
+  let ovChain = Promise.resolve();
+  const ovQueue = (fn) => { const p = ovChain.then(fn, fn); ovChain = p.catch(() => {}); return p; };
+  async function openversePhotos(q, o, signal) {
+    return ovQueue(async () => {
+      const j = await getJSON(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&license_type=commercial&mature=false&page_size=20`, { signal }, 20000);
+      const list = (j.results || [])
+        .filter((r) => r.url && okText(r.title) && okText((r.tags || []).map((t) => t.name).join(' ')) && (r.width || 0) >= 640 && !ART.test(r.title || ''))
+        .map((r) => ({ id: 'ov:' + r.id, url: r.url, small: r.thumbnail || r.url, w: r.width, h: r.height, alt: r.title || q, credit: { source: 'Openverse', author: r.creator || '', link: r.foreign_landing_url || r.url, license: `CC ${String(r.license || '').toUpperCase()} ${r.license_version || ''}`.trim(), title: r.title || '' } }));
+      return byOrientation(list, o);
+    });
+  }
+  // 키 있는 스톡(검색이 정확): 긴 검색어부터 · 키 없는 공개 아카이브: 짧은 핵심어만
+  function variants(q, open) {
     const base = String(q || '').replace(/^(photo|ai|video)\s*:\s*/i, '').trim();
-    const k = koreanize(base);
     const words = base.split(/[\s,]+/).filter(Boolean);
-    return [...new Set([k, base, words.slice(0, 3).join(' '), words.slice(0, 2).join(' ')].filter(Boolean))];
+    const w3 = words.slice(0, 3).join(' '), w2 = words.slice(0, 2).join(' ');
+    const list = open ? [koreanize(w3), w3, w2] : [koreanize(base), base, w3];
+    return [...new Set(list.filter(Boolean))];
   }
   async function findPhoto(query, { orientation = 'landscape', used = new Set(), signal } = {}) {
     const o = ORI[orientation] ? orientation : 'landscape';
-    const sources = [['pexels', pexelsPhotos], ['unsplash', unsplashPhotos], ['openverse', openversePhotos]].filter(([n]) => n === 'openverse' || has(n));
+    const sources = [['pexels', pexelsPhotos], ['unsplash', unsplashPhotos], ['wikimedia', wikimediaPhotos], ['openverse', openversePhotos]].filter(([n]) => n === 'wikimedia' || n === 'openverse' || has(n));
     for (const [name, fn] of sources) {
-      for (const q of variants(query)) {
+      for (const q of variants(query, name === 'wikimedia' || name === 'openverse')) {
         let list = [];
         try { list = await memo(`${name}|${o}|${q}`, () => fn(q, o, signal)); } catch (e) { if (e.status === 401 || e.status === 403) break; continue; }
         const pick = list.find((x) => !used.has(x.id));
@@ -151,7 +178,7 @@
     credits.forEach((c) => { (by[c.source] = by[c.source] || []).push(c); });
     const esc = (s) => String(s || '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
     const parts = Object.entries(by).map(([src, list]) => {
-      if (src === 'Openverse') return list.map((c) => `<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.title || '사진')}</a>${c.author ? ' · ' + esc(c.author) : ''} (${esc(c.license)})`).join(', ');
+      if (src === 'Openverse' || src === 'Wikimedia Commons') return `${esc(src)}: ` + list.map((c) => `<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.title || '사진')}</a>${c.author ? ' · ' + esc(c.author) : ''} (${esc(c.license)})`).join(', ');
       const authors = [...new Set(list.map((c) => c.author).filter(Boolean))].slice(0, 6).map(esc).join(', ');
       const home = { Pexels: 'https://www.pexels.com', Unsplash: 'https://unsplash.com', Pixabay: 'https://pixabay.com' }[src];
       return `${home ? `<a href="${home}" target="_blank" rel="noopener">${esc(src)}</a>` : esc(src)}${authors ? ` (${authors})` : ''}`;
