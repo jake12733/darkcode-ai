@@ -560,7 +560,7 @@
 
     els.llmModel.addEventListener('input', () => { modelTouched = true; });
     els.llmEndpoint.addEventListener('change', () => checkModel());
-    els.runnerBase.addEventListener('change', () => checkRunner());
+    els.runnerBase.addEventListener('change', () => checkRunner({ quiet: true }));
     window.addEventListener('storage', (e) => { if (e.key === engine.storageKey + ':active') refreshLock(); });
 
     window.__astraConsoleReady = true;
