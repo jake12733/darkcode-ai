@@ -11,7 +11,7 @@
   'use strict';
   const KEYS = { pexels: '', unsplash: '', pixabay: '', pollinations: '', gemini: '', azure: '', azureRegion: 'koreacentral' };
   const mem = new Map();
-  const BLOCK = /(north[\s_-]?korea|pyongyang|dprk|\bwar\b|protest|funeral|military|soldier|weapon|\bgun\b|nude|naked|blood|injur|accident|riot|demonstrat|propaganda)/i;
+  const BLOCK = /(north[\s_-]?korea|pyongyang|dprk|\bwar\b|protest|funeral|military|soldier|navy|naval|\barmy\b|marines?\b|air force|troops|veteran|weapon|\bgun\b|nude|naked|blood|injur|accident|riot|demonstrat|propaganda)/i;
   const PEOPLE = /\b(people|person|man|men|woman|women|girl|boy|doctor|dentist|nurse|patient|staff|team|family|couple|child|children|kid|student|teacher|customer|client|worker|surgeon|therapist|physician|receptionist|chef|barista|trainer|portrait|smiling|face|businessman|businesswoman|employee|senior|elderly|mother|father|baby)\b/i;
   const NATION = /\b(korean|asian|japanese|chinese|american|european|african|indian|caucasian|black|white|latino|hispanic|western|arab)\b/i;
   const STYLE = /(anime|illustration|cartoon|watercolor|vector|flat design|3d render|pixel art|sketch|line art|clay|일러스트|애니|만화|그림체|수채화|픽셀|캐릭터)/i;
