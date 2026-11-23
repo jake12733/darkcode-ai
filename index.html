@@ -81,6 +81,7 @@
     <div class="pool-strip" id="poolStrip" title="무료 API 풀 상태 · 클릭해서 설정"></div>
     <div class="top-right">
       <span class="pill" id="freeUse">FREE --/--</span>
+      <a class="icon-btn" id="studioBtn" href="studio.html" target="_blank" title="STUDIO · AI 작곡 · 뮤직비디오 제작" style="text-decoration:none;font-size:15px">&#9835;</a>
       <button class="icon-btn" id="integBtn" title="외부 서비스 연동"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
       <button class="icon-btn" id="remoteBtn" title="원격 지원 요청"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M9 10l2 2 4-4"/></svg></button>
       <button class="icon-btn" id="settingsBtn" title="API 풀 · 설정">&#9881;</button>
@@ -137,7 +138,7 @@
       </section>
       <div class="composer-wrap">
         <form class="composer" id="composer">
-          <textarea id="prompt" rows="1" placeholder="명령을 입력하세요… (예: 병원 랜딩페이지 만들어줘 · /image 네온 도시)" spellcheck="false"></textarea>
+          <textarea id="prompt" rows="1" placeholder="명령을 입력하세요… (예: 병원 랜딩페이지 만들어줘 · /image 네온 도시 · /music 비 오는 밤 감성)" spellcheck="false"></textarea>
           <div class="composer-bar">
             <div class="seg" id="modeSeg" role="radiogroup">
               <button type="button" data-mode="council" class="on">멀티 AI 상의</button>
@@ -235,6 +236,6 @@
 <script src="assets/orchestrator.js?v=20261123l6c"></script>
 <script src="assets/core-connect.js?v=20261123core"></script>
 <script src="assets/local6-connect.js?v=20261123l6d"></script>
-<script type="module" src="assets/app.js?v=20261123core"></script>
+<script type="module" src="assets/app.js?v=20261123st"></script>
 </body>
 </html>
