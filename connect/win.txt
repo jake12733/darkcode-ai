@@ -1,5 +1,5 @@
 # DARK CODE - Ollama 원클릭 연결 (Windows PowerShell 5.1+)
-# 실행: powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://jake12733.github.io/polyship-ai-terminal/connect/win.txt | iex"
+# 실행: powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://jake12733.github.io/darkcode-ai/connect/win.txt | iex"
 # 하는 일: Ollama 설치 확인/설치 -> 사이트 접속 허용(OLLAMA_ORIGINS) -> Ollama 재시작 -> 연결 확인
 #         -> 없는 DARK CODE 모델 자동 생성 -> 'Ollama 켜기' 버튼용 darkcode-ollama:// 등록 -> 사이트 열기
 
@@ -7,8 +7,8 @@ $ErrorActionPreference = 'Continue'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch {}
 
-$SITE    = 'https://jake12733.github.io/polyship-ai-terminal/'
-$BASE    = 'https://jake12733.github.io/polyship-ai-terminal/models/'
+$SITE    = 'https://jake12733.github.io/darkcode-ai/'
+$BASE    = 'https://jake12733.github.io/darkcode-ai/models/'
 $ORIGINS = @('https://jake12733.github.io')
 $API     = 'http://127.0.0.1:11434'
 $MODELS  = @('router','music','dev','media','qa','critic')

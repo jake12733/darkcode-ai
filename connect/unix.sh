@@ -1,10 +1,10 @@
 #!/bin/sh
 # DARK CODE - Ollama 원클릭 연결 (macOS / Linux)
-# 실행: curl -fsSL https://jake12733.github.io/polyship-ai-terminal/connect/unix.sh | sh
+# 실행: curl -fsSL https://jake12733.github.io/darkcode-ai/connect/unix.sh | sh
 # 하는 일: Ollama 설치 확인/설치 -> 사이트 접속 허용(OLLAMA_ORIGINS) -> 재시작 -> 연결 확인 -> 없는 모델 생성 -> 사이트 열기
 
-SITE="https://jake12733.github.io/polyship-ai-terminal/"
-BASE="https://jake12733.github.io/polyship-ai-terminal/models/"
+SITE="https://jake12733.github.io/darkcode-ai/"
+BASE="https://jake12733.github.io/darkcode-ai/models/"
 ORIGIN="https://jake12733.github.io"
 API="http://127.0.0.1:11434"
 BASEMODEL="qwen3:8b"
