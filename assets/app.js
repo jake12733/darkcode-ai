@@ -498,6 +498,7 @@ const STAGES_FAST = ['CACHE', 'CONTEXT', 'ROUTE', 'GENERATE', 'VERIFY', 'GATE', 
 const STAGES_IMAGE = ['CACHE', 'PROMPT', 'IMAGE', 'RENDER'];
 const STAGES_LOCAL6 = ['CACHE', 'ROUTER', 'WORKER', 'CRITIC', 'REVISE', 'RENDER'];
 const STAGES_CORE = ['CACHE', 'CONTEXT', 'ROUTE', 'STRATEGIST', 'IMPLEMENTER', 'CRITIC', 'GATE', 'RENDER'];
+const STAGES_EXEC = ['CACHE', 'CONNECT', 'GENERATE', 'EXECUTE', 'OBSERVE', 'PATCH', 'GATE', 'RENDER'];
 
 async function buildContext(thread, run) {
   const msgs = thread.messages.filter((m) => !m.pending).map((m) => ({ role: m.role, content: m.role === 'assistant' ? (m.modelText || m.content) : m.content }));
@@ -537,7 +538,8 @@ function routeSummary(run) {
   if (run.compressed) path.push('컨텍스트 압축');
   if (run.core) path.push(`CORE 게이트웨이 (${run.calls.map((c) => c.short).join(' → ')})`);
   if (run.local6) path.push(`로컬 6-에이전트 (${run.calls.map((c) => c.short).join(' → ')})`);
-  const free = run.calls.filter((c) => !['claude', 'ollama', 'local6', 'core'].includes(c.pid));
+  if (run.exec) path.push(`EXEC 내 PC 실행 검증 (${run.calls.map((c) => c.short).join(' → ') || '실행 없음'})`);
+  const free = run.calls.filter((c) => !['claude', 'ollama', 'local6', 'core', 'exec'].includes(c.pid));
   if (free.length) path.push(`무료 풀 순환 (${[...new Set(free.map((c) => c.short))].join(' → ')})`);
   if (run.calls.some((c) => c.pid === 'ollama')) path.push('로컬 Ollama 폴백');
   const synth = run.calls.find((c) => c.label === 'synth');
@@ -556,7 +558,7 @@ function composeAnswer(run, sec, snapshotYaml) {
   let md = `## [실시간 실행 로그 / 코드 스트림 요약]\n\`\`\`log\n${logLines.join('\n')}\n\`\`\`\n\n`;
   md += `## [라우팅 및 합의 요약]\n- **실행 경로**: ${rs.path}\n`;
   if (rs.used.length) md += `- **호출**: ${rs.used.join(' · ')}\n`;
-  md += `- **소요**: ${(run.ms / 1000).toFixed(1)}s · 모드 ${({ council: '멀티 AI 상의', claude: 'Claude Final Pass', image: '이미지 파이프라인', fast: '빠른 실행', local6: '로컬 6-에이전트 (Ollama)', core: 'CORE 게이트웨이' })[run.mode]}\n`;
+  md += `- **소요**: ${(run.ms / 1000).toFixed(1)}s · 모드 ${({ council: '멀티 AI 상의', claude: 'Claude Final Pass', image: '이미지 파이프라인', fast: '빠른 실행', local6: '로컬 6-에이전트 (Ollama)', core: 'CORE 게이트웨이', exec: 'EXEC 내 PC 실행 검증' })[run.mode]}\n`;
   if (sec.consensus) md += `\n${sec.consensus}\n`;
   md += `\n## [자율 실행 산출물]\n${sec.deliverable || '(산출물 없음)'}\n\n`;
   md += `## [세션 상태 스냅샷 (State Snapshot)]\n\`\`\`yaml\n${snapshotYaml}\n\`\`\`\n`;
@@ -592,8 +594,10 @@ async function execute(prompt, { noCache = false } = {}) {
     const key = fnv(JSON.stringify({ v: 3, mode, route: state.route, p: prompt.trim().toLowerCase(), ctx: thread.messages.slice(-5, -1).map((m) => (m.modelText || m.content).slice(0, 400)) }));
     run.stage('CACHE');
     run.log(`cache  lookup key=${key} ttl=${opts.ttl}s`, 'k');
-    const hit = noCache ? null : cacheGet(key);
+    const execMode = mode === 'exec';
+    const hit = noCache || execMode ? null : cacheGet(key);
     if (noCache) run.log('cache  bypass (다시 실행)', 't');
+    else if (execMode) run.log('cache  bypass (EXEC: 매번 내 PC에서 실제로 실행해 확인)', 't');
     let modelText, sec, snap;
     if (hit) {
       run.cacheHit = true; TEL()?.cache(true);
@@ -603,26 +607,26 @@ async function execute(prompt, { noCache = false } = {}) {
       modelText = hit.modelText; run.calls = hit.calls || [];
       run.skipStages();
     } else {
-      run.log('cache  MISS', 't'); TEL()?.cache(false);
+      if (!execMode) { run.log('cache  MISS', 't'); TEL()?.cache(false); }
       if (mode === 'image') modelText = await runImage(prompt, run);
       else if (mode === 'local6') modelText = await runLocal6(prompt, run, thread);
       else if (mode === 'core') modelText = await runCore(prompt, run, thread);
+      else if (mode === 'exec') modelText = await runExec(prompt, run, thread);
       else {
         run.stage('CONTEXT');
         const ctx = await buildContext({ ...thread, messages: thread.messages.slice(0, -1) }, run);
         if (ctx.compressed) { run.compressed = true; const real = curThread(); if (real) real.summary = thread.summary; }
         modelText = mode === 'fast' ? await runFast(prompt, ctx.messages, run, thread) : await runCouncil(prompt, ctx.messages, run, thread, mode === 'claude');
       }
-      if (mode !== 'image' && mode !== 'core') modelText = await completeHtml(run, prompt, modelText);
-      cachePut(key, { modelText, calls: run.calls });
-      run.log(`cache  store key=${key}`, 't');
+      if (mode !== 'image' && mode !== 'core' && mode !== 'exec') modelText = await completeHtml(run, prompt, modelText);
+      if (!execMode) { cachePut(key, { modelText, calls: run.calls }); run.log(`cache  store key=${key}`, 't'); }
     }
     run.stage('RENDER');
     sec = splitSections(modelText);
     snap = parseSnapshot(sec.snapshot, prompt);
     run.ms = performance.now() - run.t0;
     const answer = composeAnswer(run, sec, snap);
-    const msg = { role: 'assistant', content: answer, modelText, snapshot: snap, t: Date.now(), meta: { ms: run.ms, route: routeSummary(run).path, lines: run.lines, mode, cached: !!run.cacheHit, local6State: run.local6State || null, coreState: run.coreState || null } };
+    const msg = { role: 'assistant', content: answer, modelText, snapshot: snap, t: Date.now(), meta: { ms: run.ms, route: routeSummary(run).path, lines: run.lines, mode, cached: !!run.cacheHit, local6State: run.local6State || null, coreState: run.coreState || null, execState: run.execState || null } };
     thread = curThread() || thread;
     thread.messages.push(msg);
     thread.artifacts = buildArtifacts(sec, snap, thread, run);
@@ -810,7 +814,7 @@ function previewOverlay() {
 function previewLoading(run, prompt, mode) {
   const ov = previewOverlay();
   ov.hidden = false; ov.classList.remove('err');
-  $('.pg-title', ov).textContent = ({ core: 'CORE 게이트웨이가 만드는 중', local6: '로컬 6-에이전트가 만드는 중', image: '이미지 생성 중', fast: '빠르게 만드는 중', claude: 'Claude Final Pass 진행 중' })[mode] || '멀티 AI가 만드는 중';
+  $('.pg-title', ov).textContent = ({ core: 'CORE 게이트웨이가 만드는 중', exec: 'EXEC · 코드 생성 → 내 PC에서 실행 검증 중', local6: '로컬 6-에이전트가 만드는 중', image: '이미지 생성 중', fast: '빠르게 만드는 중', claude: 'Claude Final Pass 진행 중' })[mode] || '멀티 AI가 만드는 중';
   $('.pg-q', ov).textContent = prompt;
   $('.pg-stage', ov).textContent = '준비 중...';
   $('.pg-tail', ov).textContent = '';
@@ -995,6 +999,72 @@ state_compression: |
 ${String((res.snapshot && res.snapshot.text) || '').split('\n').map((l) => '  ' + l).join('\n')}
 \`\`\`
 `;
+}
+
+/* ---------- EXEC (AstraUnifiedEngine: 코드 생성 → 내 PC 실행기 실측 → 에러 로그로 수정 → 실행 결과로만 확정) ---------- */
+const EXEC_STAGE = { think: 'GENERATE', patch: 'PATCH', execute: 'EXECUTE', observe: 'OBSERVE', commit: 'GATE' };
+async function execWait(fn, ok, signal, limitMs) {
+  const t0 = Date.now();
+  for (;;) {
+    if (signal.aborted) { const ab = new Error('사용자 중단'); ab.kind = 'abort'; throw ab; }
+    const s = await fn();
+    if (ok(s) || (limitMs && Date.now() - t0 >= limitMs)) return s;
+    await sleep(2500);
+  }
+}
+async function runExec(prompt, run, thread) {
+  const AX = window.DCAstra;
+  if (!AX) throw new Error('EXEC 엔진(astra-mode.js)을 불러오지 못했습니다. 새로고침해 주세요.');
+  const UNV = AX.UNV;
+  run.exec = true;
+  run.log('stage  EXEC · 코드 생성 → 내 PC 실행기 실측 → 에러 로그로 자동 수정 → 실행 결과로만 확정 (토큰 0)', 'k');
+  run.stage('CONNECT');
+  let st = await AX.check();
+  if (!st.models.ok) {
+    run.log(`exec   Ollama(${AX.ollamaHost()}) 연결 안 됨 → 연결 창 표시, 켜지면 자동으로 이어서 실행`, 'warn');
+    if (window.DCLocal6) DCLocal6.open();
+    st = await execWait(() => AX.check(), (s) => s.models.ok, run.signal, 0);
+    run.log(`exec   Ollama 연결됨 · 모델 ${st.models.names.length}개`, 'ok');
+    const l6d = document.getElementById('l6dlg'); if (l6d && l6d.open) l6d.close();
+  }
+  if (!st.runner.ok) {
+    run.log(`exec   실행기(${st.runnerUrl}) 응답 없음 → darkcode-core 폴더의 start-runner.bat 실행, 켜지면 자동으로 이어서 (최대 90초 · 중단 ■)`, 'warn');
+    toast('실행기를 켜 주세요: darkcode-core 폴더의 start-runner.bat');
+    st = await execWait(() => AX.check(), (s) => s.runner.ok, run.signal, 90000);
+    run.log(st.runner.ok ? 'exec   실행기 연결됨' : `exec   실행기 계속 꺼짐 → 코드는 만들지만 실행 단계에서 멈추고 확정하지 않음 ${UNV}`, st.runner.ok ? 'ok' : 'warn');
+  }
+  const ri = st.runner.info;
+  const ask = Boolean(ri && ri.approval === 'ask');
+  run.log(`exec   모델 ${st.model || '없음'} · 실행기 ${ri ? `v${ri.version} · 승인 ${ask ? '콘솔 y/N' : ri.approval} · 격리 ${ri.permissionModel || '없음'}` : '꺼짐'}`, 't');
+  let res;
+  try {
+    res = await AX.run(prompt, {
+      signal: run.signal, model: st.model,
+      onEvent: (type, d) => {
+        if (type === 'token') { run.rain(d.text); return; }
+        if (type === 'model') { run.log(`${d.attempt > 1 ? 'repair' : 'gen   '} ${d.model} ${d.attempt > 1 ? '에러 로그 반영해 수정 중' : '코드 생성 중'} (${d.attempt}차)`, 't'); return; }
+        if (type === 'model_done') { run.log(`done   ${d.model} ${d.chars}자 (${(d.ms / 1000).toFixed(1)}s)`, 'ok'); run.calls.push({ label: d.attempt > 1 ? 'repair' : 'generate', provider: 'Ollama', short: String(d.model).toUpperCase(), pid: 'exec', model: d.model }); return; }
+        if (type === 'model_fail') { run.log(`fail   모델 호출 실패 · ${d.error}`, 'err'); return; }
+        if (type !== 'progress') return;
+        if (EXEC_STAGE[d.stage]) run.stage(EXEC_STAGE[d.stage]);
+        if (d.stage === 'build' && d.fallbackUsed) run.log(`fallback 모델 없이 0원 스텁으로 우회 · 실행돼도 확정 안 함 ${UNV}`, 'warn');
+        else if (d.stage === 'execute') { run.log(`exec   실행기로 전송 (${d.attempt}차)${ask ? ' · 실행기 창에서 코드 확인 후 y (60초 안에)' : ''}`, ask ? 'warn' : 't'); run.calls.push({ label: 'run#' + d.attempt, provider: 'runner', short: 'RUNNER', pid: 'exec', model: '' }); }
+        else if (d.stage === 'observe') {
+          const good = d.reason === 'ok' && d.outputPreview;
+          run.log(`verify ${d.attempt}차 실행 결과 ${d.reason}${d.exitCode !== null && d.exitCode !== undefined ? ` · exit ${d.exitCode}` : ''}`, good ? 'ok' : 'warn');
+          if (d.outputPreview) run.log(`stdout ${d.outputPreview.split('\n')[0].slice(0, 160)}`, 't');
+          if (d.errorPreview) run.log(`error  ${d.errorPreview.split('\n')[0].slice(0, 160)}`, 'err');
+        } else if (d.stage === 'commit') run.log(`gate   ${d.status === 'VERIFIED' ? 'VERIFIED' : UNV} · ${d.stopReason || '-'}${d.committed ? ' · committed 반영' : ''}`, d.status === 'VERIFIED' ? 'ok' : 'warn');
+      },
+    });
+  } catch (e) {
+    if (run.signal.aborted) { const ab = new Error('사용자 중단'); ab.kind = 'abort'; throw ab; }
+    throw e;
+  }
+  if (run.signal.aborted) { const ab = new Error('사용자 중단'); ab.kind = 'abort'; throw ab; }
+  if (res.status === 'SINGLE_TARGET_LOCKED') run.log(`gate   ${UNV} · SINGLE_TARGET_LOCKED · ${res.error || ''}`, 'warn');
+  run.execState = { runId: res.runId || null, status: res.status, stopReason: res.stopReason || res.status, verified: AX.isVerified(res) };
+  return AX.toMarkdown(prompt, res, st);
 }
 
 /* ---------- LOCAL 6-AGENT (Ollama: ai-router → expert → ai-critic loop) ---------- */
@@ -1194,7 +1264,7 @@ function persistArtifacts() { const t = curThread(); if (t && artifacts) { t.art
 /* ================= RUN UI ================= */
 let centerRain;
 function createRunUI(mode) {
-  const stages = mode === 'council' || mode === 'claude' ? STAGES_COUNCIL : mode === 'image' ? STAGES_IMAGE : mode === 'local6' ? STAGES_LOCAL6 : mode === 'core' ? STAGES_CORE : STAGES_FAST;
+  const stages = mode === 'council' || mode === 'claude' ? STAGES_COUNCIL : mode === 'image' ? STAGES_IMAGE : mode === 'local6' ? STAGES_LOCAL6 : mode === 'core' ? STAGES_CORE : mode === 'exec' ? STAGES_EXEC : STAGES_FAST;
   const el = document.createElement('div'); el.className = 'msg ai';
   el.innerHTML = `<div class="who"><i>AI</i>CORE ORCHESTRATOR <span class="meta">· executing</span></div>
   <div class="run"><div class="run-head"><span class="spin"></span><span class="ttl">LIVE CODE STREAM</span><span class="tm">0.0s</span></div>
@@ -1346,7 +1416,7 @@ function renderStatus() {
   const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
   const total = Object.values(prov).filter((p) => !p.primary && !p.local).length;
   $('#statusLine').innerHTML = `<span>POOL <b>${ready}/${total}</b> ready</span><span>LOCAL <b>${prov.ollama.enabled ? 'ollama on' : 'off'}</b></span><span>CLAUDE <b>${(() => { const c = claudeUse(); return `ZERO-DEFAULT · ${(c.in + c.out).toLocaleString()} tok · 승격 ${c.calls}회`; })()}</b>${usable(prov.claude) ? '' : ' (키 없음)'}</span><span>CTX <b>~${tok.toLocaleString()}</b>/${opts.compressAt.toLocaleString()} tok${t?.summary ? ' · 압축됨' : ''}</span><span>CACHE <b>${LS.get('cidx', []).length}</b> · TTL ${opts.ttl}s</span>`;
-  $('#modeBadge').textContent = ({ council: 'COUNCIL · ZERO-CLAUDE', fast: 'FAST · ZERO-CLAUDE', claude: 'CLAUDE FINAL PASS', local6: 'LOCAL 6-AGENT · OLLAMA', core: 'CORE · GATEWAY' })[state.mode];
+  $('#modeBadge').textContent = ({ council: 'COUNCIL · ZERO-CLAUDE', fast: 'FAST · ZERO-CLAUDE', claude: 'CLAUDE FINAL PASS', local6: 'LOCAL 6-AGENT · OLLAMA', core: 'CORE · GATEWAY', exec: 'EXEC · LOCAL RUN VERIFY' })[state.mode];
 }
 
 /* ================= SETTINGS ================= */
@@ -1823,6 +1893,7 @@ function wire() {
     state.mode = b.dataset.mode; $$('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b)); renderStatus();
     if (state.mode === 'local6' && window.DCLocal6) DCLocal6.check().then((s) => { if (!s.ok) DCLocal6.open(); else toast('로컬 6-에이전트 · Ollama 모델 6/6 연결됨'); });
     if (state.mode === 'core' && window.DCCore) DCCore.check().then((s) => { if (!s.ok) DCCore.open(); else toast(`CORE 게이트웨이 연결됨 · ${s.profile} 프로필`); });
+    if (state.mode === 'exec' && window.DCAstra) DCAstra.check().then((s) => toast(s.runner.ok ? `EXEC · 실행기 연결됨 (승인 ${s.runner.info.approval === 'ask' ? '콘솔 y/N' : s.runner.info.approval})${s.models.ok ? ` · 모델 ${s.model || '없음'}` : ' · Ollama 꺼짐'}` : 'EXEC · 실행기(8797) 꺼짐 → darkcode-core 폴더의 start-runner.bat 실행'));
   }));
   $('#routeSel').onchange = (e) => { state.route = e.target.value; toast(state.route === 'auto' ? 'AUTO 라운드로빈' : `${prov[state.route].name} 고정 (실패 시 로컬/Claude 폴백)`); };
   $('#newBtn').onclick = () => { if (state.running) return toast('실행 중입니다'); state.cur = null; renderThreads(); renderStream(); applyArtifacts(null); renderStatus(); setCenterView('dash'); $('#app').classList.remove('show-side'); ta.focus(); };
