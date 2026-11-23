@@ -28,24 +28,30 @@ const FIREBASE = {
   sdk: '13.4.0',
 };
 const FREE_DAILY_CAP = 80;
-const DEFAULT_OPTS = { ttl: 86400, compressAt: 6000, keepRecent: 4, firstByteTimeout: 30000, idleTimeout: 45000, cooldown429: 60, gateA: true, gateC: true, claudeMonthlyCap: 200000, claudeMaxOut: 6000 };
+const DEFAULT_OPTS = { ttl: 86400, compressAt: 16000, keepRecent: 4, firstByteTimeout: 30000, idleTimeout: 45000, cooldown429: 60, gateA: true, gateC: true, claudeMonthlyCap: 0, claudeMaxOut: 6000, localAuto: true, azureRegion: 'koreacentral' };
 
 const PROVIDER_DEFS = [
   { id: 'gemini-free', name: 'Gemini Free', short: 'GEM·FREE', kind: 'firebase', model: 'gemini-3.5-flash-lite', weight: 5, roles: ['general', 'multimodal', 'long', 'plan', 'code', 'verify', 'summary', 'synth'], builtin: true, note: '내장 무료 (Firebase AI Logic) · 키 불필요' },
-  { id: 'gemini', name: 'Gemini', short: 'GEMINI', kind: 'gemini', model: 'gemini-3.5-flash-lite', weight: 5, roles: ['multimodal', 'long', 'general', 'plan', 'synth'], needs: ['key'], note: '멀티모달 · 긴 컨텍스트 · 범용 추론' },
-  { id: 'groq', name: 'Groq', short: 'GROQ', kind: 'openai', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', weight: 4, roles: ['fast', 'plan', 'summary', 'general'], needs: ['key'], note: '초고속 초안 · 다중 관점 발산' },
-  { id: 'openrouter', name: 'OpenRouter :free', short: 'OR·FREE', kind: 'openai', base: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct:free', weight: 3, roles: ['verify', 'general', 'code'], needs: ['key'], note: '오픈/추론 모델 교차 검증' },
-  { id: 'cloudflare', name: 'Cloudflare Workers AI', short: 'CF·AI', kind: 'openai', base: 'https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', weight: 2, roles: ['fast', 'general'], needs: ['key', 'account'], note: '엣지 추론 · 브라우저 직접 호출은 CORS 차단 → Worker 프록시 URL 권장' },
-  { id: 'nvidia', name: 'NVIDIA NIM', short: 'NIM', kind: 'openai', base: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.3-70b-instruct', weight: 2, roles: ['code', 'verify', 'general'], needs: ['key'], note: '백업 추론 · CORS 차단 시 프록시 URL 입력' },
-  { id: 'mistral', name: 'Mistral', short: 'MISTRAL', kind: 'openai', base: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', weight: 2, roles: ['code', 'general', 'summary'], needs: ['key'], note: '코드 · 다국어 보조' },
-  { id: 'cohere', name: 'Cohere', short: 'COHERE', kind: 'cohere', base: 'https://api.cohere.com/v2', model: 'command-a-03-2025', weight: 1, roles: ['summary', 'verify', 'general'], needs: ['key'], note: '검색 · 요약 보조' },
-  { id: 'ollama', name: 'Ollama (로컬)', short: 'OLLAMA', kind: 'openai', base: 'http://localhost:11434/v1', model: 'qwen2.5-coder:14b', fastModel: 'llama3.2:3b', embedModel: 'nomic-embed-text', weight: 0, roles: ['local'], local: true, note: '무제한 로컬 폴백 · OLLAMA_ORIGINS에 이 사이트 주소 허용 필요' },
+  { id: 'gemini', name: 'Gemini (내 키 · 무료 등급)', short: 'GEMINI', kind: 'gemini', model: 'gemini-3.8-flash', prefer: ['gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-3.5-flash-lite'], weight: 6, roles: ['multimodal', 'long', 'general', 'plan', 'synth', 'code', 'verify'], needs: ['key'], note: 'AI Studio 무료 키 · 긴 컨텍스트 · 홍보영상 나레이션(TTS)도 이 키 사용' },
+  { id: 'groq', name: 'Groq', short: 'GROQ', kind: 'openai', base: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', prefer: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'], weight: 4, roles: ['fast', 'plan', 'summary', 'general', 'code'], needs: ['key'], note: '무료 30회/분 · 1천회/일 · 초고속' },
+  { id: 'openrouter', name: 'OpenRouter :free', short: 'OR·FREE', kind: 'openai', base: 'https://openrouter.ai/api/v1', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', prefer: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-super-vl:free', 'google/gemma-4-26b-a4b-it:free'], weight: 3, roles: ['verify', 'general', 'code'], needs: ['key'], note: ':free 모델 20회/분 · 50회/일' },
+  { id: 'cerebras', name: 'Cerebras', short: 'CEREBRAS', kind: 'openai', base: 'https://api.cerebras.ai/v1', model: 'gpt-oss-120b', prefer: ['gpt-oss-120b', 'qwen-3.8-27b'], weight: 3, roles: ['fast', 'code', 'general'], needs: ['key'], note: '체험 크레딧 (카드 등록 필요) · 초고속' },
+  { id: 'cohere', name: 'Cohere (체험 키)', short: 'COHERE', kind: 'openai', base: 'https://api.cohere.ai/compatibility/v1', model: 'command-a-plus-05-2026', weight: 1, roles: ['summary', 'verify', 'general'], needs: ['key'], note: '체험 키 월 1천회 · 상업용 사용 불가' },
+  { id: 'cloudflare', name: 'Cloudflare Workers AI', short: 'CF·AI', kind: 'openai', base: 'https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1', model: '@cf/openai/gpt-oss-120b', corsBlocked: true, weight: 2, roles: ['fast', 'general'], needs: ['key', 'account'], note: '무료 1만 뉴런/일 · 브라우저 직접 호출 차단 → Base URL 에 프록시 주소 필요' },
+  { id: 'nvidia', name: 'NVIDIA NIM', short: 'NIM', kind: 'openai', base: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-pro', corsBlocked: true, weight: 2, roles: ['code', 'verify', 'general'], needs: ['key'], note: '무료 프로토타입 40회/분 · 브라우저 직접 호출 차단 → 프록시 Base URL 필요' },
+  { id: 'sambanova', name: 'SambaNova', short: 'SAMBA', kind: 'openai', base: 'https://api.sambanova.ai/v1', model: 'gpt-oss-120b', corsBlocked: true, weight: 1, roles: ['general', 'code'], needs: ['key'], note: '무료 20회/일 · 브라우저 직접 호출 차단 → 프록시 Base URL 필요' },
+  { id: 'mistral', name: 'Mistral (유료)', short: 'MISTRAL', kind: 'openai', base: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', paid: true, weight: 0, roles: ['code', 'general', 'summary'], needs: ['key'], note: '무료 API 없음 · 가중치 0 = 자동 사용 안 함' },
+  { id: 'deepseek', name: 'DeepSeek (유료 · 저가)', short: 'DEEPSEEK', kind: 'openai', base: 'https://api.deepseek.com', model: 'deepseek-flash', paid: true, weight: 0, roles: ['code', 'general', 'plan'], needs: ['key'], note: '유료 저가 · 가중치 0 = 자동 사용 안 함 (올리면 풀 참여)' },
+  { id: 'openai', name: 'OpenAI GPT-6.2 (유료)', short: 'OPENAI', kind: 'openai', base: 'https://api.openai.com/v1', model: 'gpt-6.2-sol', prefer: ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-luna'], paid: true, weight: 0, roles: ['code', 'synth', 'plan', 'verify'], needs: ['key'], note: '유료 · Astra 입력 $8 / 출력 $40 (100만 토큰) · 가중치 0 = 자동 사용 안 함' },
+  { id: 'ollama', name: 'Ollama (로컬)', short: 'OLLAMA', kind: 'openai', base: 'http://localhost:11434/v1', model: 'qwen3:8b', fastModel: 'qwen3:8b', embedModel: 'nomic-embed-text', weight: 0, roles: ['local'], local: true, note: '무제한 · 켜져 있으면 자동 연결 · 설치된 모델 자동 선택' },
   { id: 'claude', name: 'Claude (주력 브레인)', short: 'CLAUDE', kind: 'anthropic', model: 'claude-sonnet-5-5', weight: 0, roles: ['synth'], needs: ['key'], primary: true, note: '최종 통합 · 품질 검증' },
 ];
 
 /* ================= STATE ================= */
 let user = null;
 let opts = { ...DEFAULT_OPTS, ...LS.get('opts', {}) };
+if (opts.compressAt === 6000) opts.compressAt = 16000; // 예전 기본값 → 새 기본값
+if (opts.claudeMonthlyCap === 200000) opts.claudeMonthlyCap = 0; // 토큰 상한 없음 (0 = 무제한)
 const prov = {}; // runtime provider objects
 function loadProviders() {
   const saved = LS.get('prov', {});
@@ -68,6 +74,81 @@ function saveHealth() {
   const o = {}; for (const p of Object.values(prov)) o[p.id] = { health: p.health, cooldownUntil: p.cooldownUntil, ok: p.ok, fail: p.fail, lat: p.lat, lastErr: p.lastErr };
   LS.set('health', o);
 }
+function saveProvidersMeta() { // 키는 건드리지 않고 설정만 저장 (금고 이전 대기 중인 평문 키는 보존)
+  const prev = LS.get('prov', {});
+  const o = {};
+  for (const p of Object.values(prov)) o[p.id] = { ...(prev[p.id] && prev[p.id].key ? { key: prev[p.id].key } : {}), account: p.account, model: p.model, fastModel: p.fastModel, base: p.base, weight: p.weight, enabled: p.enabled };
+  LS.set('prov', o);
+}
+/* ---------- 미디어 키 (실사 사진·영상 · AI 이미지 · 나레이션) · 암호화 금고 보관 ---------- */
+const MEDIA_KEYS = [
+  { id: 'pexels', name: 'Pexels', note: '실사 사진 + 영상 · 무료 (월 2만회)', ph: 'Pexels API 키' },
+  { id: 'unsplash', name: 'Unsplash', note: '실사 사진 · 무료 (시간당 50회)', ph: 'Unsplash Access Key' },
+  { id: 'pixabay', name: 'Pixabay', note: '실사 영상 · 무료 (분당 100회)', ph: 'Pixabay API 키' },
+  { id: 'pollinations', name: 'Pollinations', note: 'AI 실사 이미지 · pollen 키 (sk_)', ph: 'sk_…' },
+  { id: 'azure', name: 'Azure Speech', note: '나레이션 · F0 무료 월 50만 자', ph: 'Azure Speech 키' },
+];
+const mediaKeys = {};
+function applyMediaKeys() { if (window.DCMedia) window.DCMedia.setKeys({ ...mediaKeys, gemini: (prov.gemini && prov.gemini.key) || '', azureRegion: opts.azureRegion || 'koreacentral' }); }
+async function loadMediaKeys() {
+  try {
+    await loadCloud();
+    const pend = LS.get('mediaPending', null); // 평문으로 들어온 키는 금고로 옮기고 지운다
+    if (pend && typeof pend === 'object') { for (const [id, v] of Object.entries(pend)) if (v) await cloud.vault.put('media:' + id, String(v)); LS.del('mediaPending'); }
+    for (const m of MEDIA_KEYS) { const k = await cloud.vault.get('media:' + m.id); if (k) mediaKeys[m.id] = k; }
+  } catch (e) { console.warn('media vault', e); }
+  applyMediaKeys();
+}
+function mediaStatusText() {
+  const s = window.DCMedia ? window.DCMedia.status() : null;
+  if (!s) return '미디어 엔진 없음';
+  return `사진 ${s.photo.join('·')} · 영상 ${s.video.join('·') || '없음 (Pexels/Pixabay 키 필요)'} · AI 이미지 ${s.ai === 'classic' ? 'Classic (불안정)' : 'Pollinations'} · 나레이션 ${s.tts.join('·') || '없음 (Gemini 키 필요)'}`;
+}
+/* ---------- 로컬 Ollama 무제한 백업: 켜져 있으면 자동 연결 · 설치된 모델 자동 선택 ---------- */
+async function autoLocal() {
+  const o = prov.ollama; if (!o || opts.localAuto === false) return;
+  const base = String(o.base || 'http://localhost:11434/v1').replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  try {
+    const r = await fetch(base + '/api/tags', { cache: 'no-store', signal: AbortSignal.timeout(3500) });
+    if (!r.ok) return;
+    const names = ((await r.json()).models || []).map((m) => String(m.name));
+    if (!names.length) return;
+    const has = (n) => Boolean(n) && (names.includes(n) || names.includes(n + ':latest'));
+    const clean = (n) => String(n).replace(/:latest$/, '');
+    let changed = false;
+    if (!has(o.model)) { o.model = clean(['qwen3:8b', 'qwen2.5-coder:7b', 'qwen3:14b', 'ai-dev'].find(has) || names.find((n) => /coder/i.test(n)) || names.find((n) => /^qwen3/i.test(n)) || names[0]); changed = true; }
+    if (!has(o.fastModel)) { o.fastModel = clean(['qwen3:4b', 'qwen3:1.7b', 'llama3.2:3b'].find(has) || o.model); changed = true; }
+    if (!o.enabled) { o.enabled = true; changed = true; }
+    if (changed) { saveProvidersMeta(); renderPool(); renderStatus(); TEL()?.log(`local  Ollama 자동 연결 · ${o.model} (무제한 백업)`, 'ok'); }
+  } catch { /* Ollama 꺼짐: 클라우드 풀만 사용 */ }
+}
+/* ---------- 모델 이름 자동 갱신: 키가 있는 프로바이더의 실제 모델 목록에서 고른다 (하루 1번) ---------- */
+async function refreshModels(force) {
+  const day = today();
+  const last = force ? {} : LS.get('modelsRefreshed', {});
+  let changed = false;
+  for (const p of Object.values(prov)) {
+    if (!p.prefer || p.local || p.builtin || !hasCreds(p) || !viaOk(p) || last[p.id] === day) continue;
+    try {
+      let ids = [];
+      if (p.kind === 'gemini') {
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': p.key }, signal: AbortSignal.timeout(8000) });
+        if (!r.ok) continue;
+        ids = ((await r.json()).models || []).map((m) => String(m.name).replace(/^models\//, ''));
+      } else if (p.kind === 'openai') {
+        const base = String(p.base || '').replace('{account}', p.account || '').replace(/\/$/, '');
+        const r = await fetch(base + '/models', { headers: p.key ? { Authorization: `Bearer ${p.key}` } : {}, signal: AbortSignal.timeout(8000) });
+        if (!r.ok) continue;
+        ids = ((await r.json()).data || []).map((m) => String(m.id));
+      }
+      if (!ids.length) continue;
+      last[p.id] = day;
+      if (!ids.includes(p.model)) { const pick = p.prefer.find((m) => ids.includes(m)); if (pick) { TEL()?.log(`models ${p.short} ${p.model} → ${pick} (자동 갱신)`, 'k'); p.model = pick; changed = true; } }
+    } catch { /* 다음에 다시 */ }
+  }
+  LS.set('modelsRefreshed', last);
+  if (changed) { saveProvidersMeta(); renderPool(); renderRouteSel(); }
+}
 function saveProviders() {
   const o = {}; for (const p of Object.values(prov)) o[p.id] = { account: p.account, model: p.model, fastModel: p.fastModel, base: p.base, weight: p.weight, enabled: p.enabled };
   LS.set('prov', o); // no secrets in localStorage
@@ -77,9 +158,10 @@ loadProviders();
 
 const hasCreds = (p) => !(p.needs || []).some((n) => !p[n]);
 const cooling = (p) => p.cooldownUntil > Date.now();
-const usable = (p) => p.enabled && hasCreds(p) && !cooling(p) && p.health > 0.05;
+const viaOk = (p) => !p.corsBlocked || Boolean(p.base && p.base !== (PROVIDER_DEFS.find((d) => d.id === p.id) || {}).base);
+const usable = (p) => p.enabled && hasCreds(p) && viaOk(p) && !cooling(p) && p.health > 0.05;
 function provState(p) {
-  if (!p.enabled || !hasCreds(p)) return 'off';
+  if (!p.enabled || !hasCreds(p) || !viaOk(p)) return 'off';
   if (cooling(p)) return 'cool';
   if (p.health < 0.35) return 'bad';
   return 'ok';
@@ -88,7 +170,7 @@ function provState(p) {
 /* ================= FREE USAGE ================= */
 function freeUse() { const u = LS.get('free', {}); return u.d === today() ? u.n : 0; }
 function bumpFree() { LS.set('free', { d: today(), n: freeUse() + 1 }); renderFree(); }
-function renderFree() { $('#freeUse').textContent = `FREE ${freeUse()}/${FREE_DAILY_CAP}`; }
+function renderFree() { $('#freeUse').textContent = `FREE ∞ · 오늘 ${freeUse()}`; }
 
 /* ================= CLAUDE METER (Zero-Claude) ================= */
 const month = () => new Date().toISOString().slice(0, 7);
@@ -179,7 +261,7 @@ async function callProvider(p, { system, messages, onToken, signal, maxTokens = 
   if (p.kind === 'firebase' || p.kind === 'gemini') {
     let url, headers = { 'Content-Type': 'application/json' };
     if (p.kind === 'firebase') {
-      if (freeUse() >= FREE_DAILY_CAP) throw new ProvError(429, `내장 무료 일일 한도(${FREE_DAILY_CAP}) 소진`, 'quota');
+      // 앱 자체 일일 한도 없음 (Google 무료 할당량을 넘으면 429 → 다음 경로로 자동 전환)
       url = `https://firebasevertexai.googleapis.com/v1beta/projects/${FIREBASE.projectId}/models/${model}:streamGenerateContent?alt=sse`;
       headers['x-goog-api-key'] = FIREBASE.apiKey; headers['X-Firebase-AppId'] = FIREBASE.appId;
       try { const tk = await appCheckToken(); if (tk) headers['X-Firebase-AppCheck'] = tk; } catch (e) { console.warn('appcheck', e); }
@@ -274,7 +356,8 @@ async function routeCall({ role, system, messages, onToken, signal, log, avoid =
     log(`route  ${label || role} → ${p.name} [${model}] w=${(p._ew ?? p.weight).toFixed?.(2) ?? p.weight} health=${p.health.toFixed(2)}`, 'route');
     const t0 = performance.now();
     let first = true;
-    const text = await callProvider(p, { system, messages, signal, maxTokens, temperature, modelOverride, onToken: (t) => { if (first) { first = false; log(`stream ${p.short} first-byte ${Math.round(performance.now() - t0)}ms`, 't'); } onToken?.(t); } });
+    let text = await callProvider(p, { system, messages, signal, maxTokens, temperature, modelOverride, onToken: (t) => { if (first) { first = false; log(`stream ${p.short} first-byte ${Math.round(performance.now() - t0)}ms`, 't'); } onToken?.(t); } });
+    if (/<think>/i.test(text)) text = text.replace(/<think>[\s\S]*?<\/think>\s*/gi, '').trim();
     if (!text.trim()) throw new ProvError(502, '빈 응답');
     const ms = performance.now() - t0; markOk(p, ms);
     log(`done   ${p.short} ${Math.round(ms)}ms · ~${estTok(text)} tok`, 'ok');
@@ -335,7 +418,7 @@ const SYSTEM_CORE = `당신은 DARK CODE의 코어 오케스트레이터이자 �
 - 한국어로, 군더더기 없이 결론부터. 코드는 생략("...", "나머지 동일") 없이 바로 실행 가능한 완성본을 언어가 표시된 코드 블록에 담습니다.
 - 웹 페이지/UI 요청이면 CSS·JS를 내장한 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)을 반드시 포함하십시오. 플랫폼의 우측 미리보기 패널에 바로 렌더됩니다. 웹 산출물 규칙(반드시 준수):
   1) 빌드·외부 파일 없이 미리보기에서 즉시 렌더되는 완결된 단일 HTML/CSS/JS. 라이브러리·폰트도 없이 동작하게(시스템 폰트 스택).
-  2) 외부 이미지 URL(AI 이미지 생성 링크, unsplash/picsum/placeholder 등)을 img src나 CSS url()에 절대 쓰지 마십시오. 대신 인라인 SVG, Canvas로 그린 그래픽, data URI, 또는 사용자 사진 업로드(파일 선택·드래그앤드롭)를 구현해 빈칸·깨진 이미지가 없게 하십시오.
+  2) 사진·영상은 실사 소재로 자동 삽입됩니다. 외부 이미지·영상 URL을 직접 쓰지 말고 아래 표식만 쓰십시오 (플랫폼이 Pexels·Unsplash·Openverse 등의 실사 사진/영상으로 바꿔 넣고 출처를 표기합니다): 사진 <img data-dc-img="영문 검색어" alt="한국어 설명">, 히어로·섹션 배경 사진은 요소에 data-dc-bg="영문 검색어", 배경 영상은 <video data-dc-video="영문 검색어" autoplay muted loop playsinline></video>. 검색어는 장면을 구체적으로 쓰고(예: "korean dentist explaining to patient in bright modern clinic"), 인물은 국적 지정이 없으면 korean 을 넣고, 같은 사람이 반복되지 않게 장면마다 다른 검색어를 쓰십시오. 사용자가 일러스트·애니메이션을 요청하지 않았다면 실사 기준입니다. 로고·아이콘·차트는 인라인 SVG로 그리고, 표식 자리에는 aspect-ratio·object-fit:cover·배경색을 지정해 로딩 전에도 레이아웃이 깨지지 않게 하십시오.
   3) 모든 버튼·탭·필터·모달·폼은 실제 상태 변화와 시각 피드백을 가지며, 주요 데이터는 localStorage에 저장·복원합니다. localStorage가 막힌 샌드박스(미리보기)에서는 조용히 메모리 저장으로 대체하고 오류 배너를 띄우지 마십시오. 폼은 필수값 검증·완료 피드백을 포함합니다.
   4) 원격 접속·제어 기능을 넣을 때는 대상자가 명시적으로 수락(ACCEPT)한 경우에만 활성화되는 상태 머신(PENDING → ACCEPTED → CONNECTED / TERMINATED, 만료 타이머, 거절·종료 시 즉시 해제·기록 저장)로 만들고, 실행 로그는 브라우저가 실제로 할 수 있는 작업만 표시합니다(가짜 바이러스/PC 스캔 문구 금지).
   5) 외부 웹사이트를 iframe으로 삽입하지 말고 window.open(url, '_blank', 'noopener,noreferrer')로 열며, 상단 네비 스무스 스크롤·모바일 메뉴·360px 폭까지 가로 넘침/요소 겹침 없는 반응형을 완성합니다.
@@ -539,7 +622,8 @@ function routeSummary(run) {
   if (run.core) path.push(`CORE 게이트웨이 (${run.calls.map((c) => c.short).join(' → ')})`);
   if (run.local6) path.push(`로컬 6-에이전트 (${run.calls.map((c) => c.short).join(' → ')})`);
   if (run.exec) path.push(`EXEC 내 PC 실행 검증 (${run.calls.map((c) => c.short).join(' → ') || '실행 없음'})`);
-  const free = run.calls.filter((c) => !['claude', 'ollama', 'local6', 'core', 'exec'].includes(c.pid));
+  const mediaCalls = run.calls.filter((c) => c.pid === 'media'); if (mediaCalls.length) path.push(`미디어 (${mediaCalls.map((c) => c.provider).join(' → ')})`);
+  const free = run.calls.filter((c) => !['claude', 'ollama', 'local6', 'core', 'exec', 'media'].includes(c.pid));
   if (free.length) path.push(`무료 풀 순환 (${[...new Set(free.map((c) => c.short))].join(' → ')})`);
   if (run.calls.some((c) => c.pid === 'ollama')) path.push('로컬 Ollama 폴백');
   const synth = run.calls.find((c) => c.label === 'synth');
@@ -553,7 +637,7 @@ function routeSummary(run) {
 }
 
 function composeAnswer(run, sec, snapshotYaml) {
-  const logLines = run.lines.filter((l) => /route|done|fail|fallback|cache|ctx|stage|image|gate|verify|repair|claude/.test(l)).slice(-22);
+  const logLines = run.lines.filter((l) => /route|done|fail|fallback|cache|ctx|stage|image|gate|verify|repair|claude|media/.test(l)).slice(-22);
   const rs = routeSummary(run);
   let md = `## [실시간 실행 로그 / 코드 스트림 요약]\n\`\`\`log\n${logLines.join('\n')}\n\`\`\`\n\n`;
   md += `## [라우팅 및 합의 요약]\n- **실행 경로**: ${rs.path}\n`;
@@ -563,6 +647,30 @@ function composeAnswer(run, sec, snapshotYaml) {
   md += `\n## [자율 실행 산출물]\n${sec.deliverable || '(산출물 없음)'}\n\n`;
   md += `## [세션 상태 스냅샷 (State Snapshot)]\n\`\`\`yaml\n${snapshotYaml}\n\`\`\`\n`;
   return md;
+}
+
+/* ---------- 실사 미디어 자동 삽입: data-dc-img / data-dc-bg / data-dc-video 표식 → 실제 사진·영상 ---------- */
+const MEDIA_RULE = '\n\n[미디어 규칙] 사진·영상 자리는 외부 URL 대신 표식만 쓰세요: 사진 <img data-dc-img="영문 검색어" alt="한국어 설명">, 배경 사진은 요소에 data-dc-bg="영문 검색어", 영상 <video data-dc-video="영문 검색어" autoplay muted loop playsinline></video>. 플랫폼이 실사 사진·영상으로 바꿔 넣습니다. 인물은 국적 지정이 없으면 korean 을 검색어에 넣고, 장면마다 다른 검색어를 쓰세요.';
+const WEB_RE = /(홈페이지|웹사이트|사이트|랜딩|웹페이지|쇼핑몰|포트폴리오|website|landing|homepage|web\s?page|\bhtml\b)/i;
+const withMediaRule = (prompt) => (WEB_RE.test(prompt) ? prompt + MEDIA_RULE : prompt);
+async function resolveMedia(modelText, run) {
+  const M = window.DCMedia;
+  if (!M || !/data-dc-(img|bg|video)\s*=/.test(modelText)) return modelText;
+  run.log('stage  MEDIA · 실사 사진·영상 자동 삽입', 'k');
+  let out = modelText;
+  for (const b of [...modelText.matchAll(/```html[^\n]*\n([\s\S]*?)```/gi)]) {
+    if (!/data-dc-(img|bg|video)\s*=/.test(b[1])) continue;
+    try {
+      const r = await M.resolveHtml(b[1], { log: (m, c) => run.log('media  ' + m, c || 't'), signal: run.signal });
+      out = out.replace(b[0], () => '```html\n' + r.html + '\n```');
+      const s = r.stats;
+      run.log(`media  사진 ${s.photos} · 배경 ${s.bgs} · 영상 ${s.videos}${s.ai ? ` · AI ${s.ai}` : ''} 삽입${s.failed ? ` · 실패 ${s.failed}` : ''} (${s.sources.join(', ') || '출처 없음'})`, s.failed ? 'warn' : 'ok');
+    } catch (e) {
+      if (run.signal.aborted) { const ab = new Error('사용자 중단'); ab.kind = 'abort'; throw ab; }
+      run.log(`media  자동 삽입 실패 · ${e.message} (원본 유지)`, 'warn');
+    }
+  }
+  return out;
 }
 
 async function execute(prompt, { noCache = false } = {}) {
@@ -619,6 +727,7 @@ async function execute(prompt, { noCache = false } = {}) {
         modelText = mode === 'fast' ? await runFast(prompt, ctx.messages, run, thread) : await runCouncil(prompt, ctx.messages, run, thread, mode === 'claude');
       }
       if (mode !== 'image' && mode !== 'core' && mode !== 'exec') modelText = await completeHtml(run, prompt, modelText);
+      if (mode !== 'image' && mode !== 'exec') modelText = await resolveMedia(modelText, run);
       if (!execMode) { cachePut(key, { modelText, calls: run.calls }); run.log(`cache  store key=${key}`, 't'); }
     }
     run.stage('RENDER');
@@ -909,38 +1018,38 @@ async function runCouncil(prompt, history, run, thread, forceClaude) {
   return v.text;
 }
 
+const IMG_PROMPT_SYS = 'Rewrite the user request as one vivid English image-generation prompt (max 60 words: subject, setting, lighting, composition, lens). Default to a photorealistic photograph unless the user explicitly asks for illustration, anime, cartoon or another drawing style. If people appear and no nationality is given, make them Korean. Output only the prompt.';
 async function runImage(prompt, run) {
   const raw = prompt.replace(/^\/\S+\s+/, '').trim();
   run.stage('PROMPT');
-  run.log('stage  이미지 프롬프트 영문 최적화 (fast 역할)', 'k');
+  run.log('stage  이미지 프롬프트 영문 최적화 (실사 기본 · 인물은 한국인)', 'k');
   let en = raw;
   try {
-    const r = await callTracked(run, { role: 'fast', label: 'prompt', system: 'Rewrite the user request as one vivid English image-generation prompt (max 60 words: subject, style, lighting, composition, lens). Output only the prompt.', messages: [{ role: 'user', content: raw }], maxTokens: 200, temperature: 0.7 });
+    const r = await callTracked(run, { role: 'fast', label: 'prompt', system: IMG_PROMPT_SYS, messages: [{ role: 'user', content: raw }], maxTokens: 220, temperature: 0.7 });
     en = r.text.trim().replace(/^"|"$/g, '');
   } catch (e) { if (e.kind === 'abort') throw e; run.log('prompt 최적화 실패 → 원문 사용', 'warn'); }
   run.stage('IMAGE');
-  const seed = Math.floor(Math.random() * 1e6);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(en)}?width=1280&height=768&nologo=true&seed=${seed}`;
-  run.log(`image  pipeline → Pollinations (무료·키 없음) seed=${seed} · Cloudflare 이미지 경로는 프록시 설정 시 사용`, 'route');
+  const M = window.DCMedia;
+  if (!M) throw new ProvError(500, '미디어 엔진을 불러오지 못했습니다. 새로고침해 주세요.');
   const t0 = performance.now();
-  const ctl = new AbortController();
-  const onAb = () => ctl.abort();
-  run.signal.addEventListener('abort', onAb, { once: true });
-  const to = setTimeout(() => ctl.abort(), 120000);
-  let blob;
   try {
-    const res = await fetch(url, { signal: ctl.signal });
-    if (!res.ok) throw new ProvError(res.status, `이미지 서버 ${res.status}${res.status === 429 ? ' (무료 한도: 약 45초에 1장)' : ''}`);
-    blob = await res.blob();
-    if (!blob.type.startsWith('image/')) throw new ProvError(502, '이미지가 아닌 응답');
+    run.log(`image  AI 실사 생성 → ${M.has('pollinations') ? 'Pollinations (pollen 키)' : 'Pollinations Classic (무료 · 혼잡하면 재시도)'}`, 'route');
+    const a = await M.aiPhoto(en, { width: 1280, height: 768, signal: run.signal, retries: 3, onWait: (i) => run.log(`image  무료 서버 혼잡 → 11초 뒤 재시도 (${i}/3)`, 'warn') });
+    const shown = a.url || a.dataUrl;
+    if (a.url) IMG_BLOBS[a.url] = URL.createObjectURL(a.blob);
+    run.log(`done   image ${Math.round(performance.now() - t0)}ms · ${Math.round(a.blob.size / 1024)}KB · ${a.source}`, 'ok');
+    run.calls.push({ label: 'image', provider: a.source, short: 'AI-IMG', pid: 'media', model: 'flux' });
+    return `## 합의 요약\n- 요청을 실사 기준 영문 프롬프트로 바꿔 AI 이미지로 생성했습니다 (${a.source}).\n- 같은 프롬프트로 다시 실행하면 다른 seed 로 변형이 나옵니다.\n## 자율 실행 산출물\n![generated](${shown})\n\n**프롬프트(EN)**\n\`\`\`text\n${a.prompt}\n\`\`\`\n`;
   } catch (e) {
     if (run.signal.aborted) throw new ProvError(0, '사용자 중단', 'abort');
-    throw e instanceof ProvError ? e : new ProvError(504, `이미지 생성 실패 (${e.message})`);
-  } finally { clearTimeout(to); run.signal.removeEventListener('abort', onAb); }
-  IMG_BLOBS[url] = URL.createObjectURL(blob);
-  run.log(`done   image ${Math.round(performance.now() - t0)}ms · ${Math.round(blob.size / 1024)}KB`, 'ok');
-  run.calls.push({ label: 'image', provider: 'Pollinations', short: 'POLLI', pid: 'pollinations', model: 'flux' });
-  return `## 합의 요약\n- 요청을 영문 이미지 프롬프트로 최적화한 뒤 무료 이미지 파이프라인으로 생성했습니다.\n- 같은 프롬프트에 seed만 바꾸면 변형을 만들 수 있습니다.\n## 자율 실행 산출물\n![generated](${url})\n\n**프롬프트(EN)**\n\`\`\`text\n${en}\n\`\`\`\n\n- 원본: [이미지 새 창으로 열기](${url})\n- 변형: seed 값을 바꿔 재생성 · 비율은 width/height 파라미터로 조정\n## 세션 상태 스냅샷\n\`\`\`yaml\nuser_goal: "${raw.replace(/"/g, "'").slice(0, 80)}"\ncompleted_steps: ["프롬프트 최적화", "이미지 생성 (seed ${seed})"]\nactive_artifacts: ["generated image 1280x768"]\npending_tasks: ["필요 시 변형/업스케일"]\nconstraints: ["무료 파이프라인 · 상업 이용 전 라이선스 확인"]\n\`\`\``;
+    run.log(`fail   AI 이미지 · ${e.message} → 같은 주제 실사 스톡 사진으로 대체`, 'warn');
+  }
+  const p = await M.findPhoto(en, { orientation: 'landscape', signal: run.signal });
+  if (!p) throw new ProvError(502, 'AI 이미지 서버가 막혀 있고 스톡 사진도 찾지 못했습니다. 잠시 뒤 다시 시도하거나 설정에서 Pollinations/Pexels 키를 넣어 주세요.');
+  run.log(`done   stock photo · ${p.credit.source}${p.credit.author ? ' · ' + p.credit.author : ''}`, 'ok');
+  run.calls.push({ label: 'image', provider: p.credit.source, short: 'STOCK', pid: 'media', model: '' });
+  const alt = String(p.alt || 'photo').replace(/[\[\]]/g, '');
+  return `## 합의 요약\n- AI 이미지 무료 서버가 막혀 같은 주제의 실사 스톡 사진으로 대체했습니다 (${p.credit.source}). 설정에서 Pollinations 키를 넣으면 AI 생성이 안정적으로 됩니다.\n## 자율 실행 산출물\n![${alt}](${p.url})\n\n- 출처: [${p.credit.source}${p.credit.author ? ' · ' + p.credit.author : ''}](${p.credit.link}) ${p.credit.license || ''}\n\n**검색어/프롬프트(EN)**\n\`\`\`text\n${en}\n\`\`\`\n`;
 }
 
 /* ---------- CORE 게이트웨이 (darkcode-core: 역할별 엔진 라우팅 + 검수 루프 + 통합 세션) ---------- */
@@ -1086,7 +1195,7 @@ async function runLocal6(prompt, run, thread) {
   const sec = (ms) => (ms / 1000).toFixed(1) + 's';
   let r;
   try {
-    r = await orch.run(prompt, {
+    r = await orch.run(withMediaRule(prompt), {
       state: prev,
       signal: run.signal,
       onEvent: (ev) => {
@@ -1187,11 +1296,13 @@ function renderFiles() {
 }
 // preview safety: external images -> inline SVG, external iframes -> new-tab link card (no broken images, no framed sites)
 const svgPh = (label, i) => { const h = (i * 47) % 360; return 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h},35%,15%)"/><stop offset="1" stop-color="#020403"/></linearGradient><radialGradient id="r" cx=".72" cy=".28" r=".6"><stop offset="0" stop-color="hsla(145,100%,50%,.32)"/><stop offset="1" stop-color="hsla(145,100%,50%,0)"/></radialGradient></defs><rect width="1200" height="800" fill="url(#g)"/><rect width="1200" height="800" fill="url(#r)"/><circle cx="600" cy="360" r="118" fill="none" stroke="#00FF66" stroke-opacity=".55" stroke-width="3"/><path d="M540 400l42-52 34 40 22-26 50 38z" fill="#00FF66" fill-opacity=".55"/><text x="600" y="560" text-anchor="middle" font-family="monospace" font-size="30" fill="#9fe3b8">${label}</text></svg>`); };
+// 자동 삽입한 실사 미디어 출처는 미리보기에서도 그대로 보여 준다. 그 외 외부 이미지는 SVG 자리표시로 바꾼다.
+const MEDIA_OK = /^(?:https?:)?\/\/(?:images\.pexels\.com|videos\.pexels\.com|images\.unsplash\.com|plus\.unsplash\.com|cdn\.pixabay\.com|pixabay\.com|[a-z0-9-]+\.staticflickr\.com|api\.openverse\.org|upload\.wikimedia\.org|thumb\.wikimedia\.org|image\.pollinations\.ai)\//i;
 function sanitizePreview(html) {
   let n = 0;
-  html = html.replace(/\s(srcset)\s*=\s*(["'])[^"']*https?:\/\/[^"']*\2/gi, '');
-  html = html.replace(/(<img\b[^>]*?\bsrc\s*=\s*)(["'])(?:https?:)?\/\/[^"']+\2/gi, (m, pre, q) => { n++; return `${pre}${q}${svgPh('IMAGE ' + n, n)}${q}`; });
-  html = html.replace(/url\(\s*(["']?)(?:https?:)?\/\/[^)"']+\1\s*\)/gi, (m) => { if (/fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com/i.test(m)) return m; n++; return `url("${svgPh('BG ' + n, n)}")`; });
+  html = html.replace(/\s(srcset)\s*=\s*(["'])([^"']*)\2/gi, (m, a, q, v) => (/https?:\/\//i.test(v) && v.split(',').some((s) => !MEDIA_OK.test(s.trim().split(/\s+/)[0])) ? '' : m));
+  html = html.replace(/(<img\b[^>]*?\bsrc\s*=\s*)(["'])((?:https?:)?\/\/[^"']+)\2/gi, (m, pre, q, url) => { if (MEDIA_OK.test(url)) return m; n++; return `${pre}${q}${svgPh('IMAGE ' + n, n)}${q}`; });
+  html = html.replace(/url\(\s*(["']?)((?:https?:)?\/\/[^)"']+)\1\s*\)/gi, (m, q, url) => { if (/fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com/i.test(m) || MEDIA_OK.test(url)) return m; n++; return `url("${svgPh('BG ' + n, n)}")`; });
   html = html.replace(/<iframe\b[^>]*\bsrc\s*=\s*(["'])(https?:\/\/[^"']+)\1[^>]*>(?:\s*<\/iframe>)?/gi, (m, q, url) => { n++; return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;min-height:160px;border:1px dashed #2a3a30;border-radius:12px;color:#00FF66;font:600 14px monospace;text-decoration:none">외부 페이지 새 탭에서 열기 ↗</a>`; });
   sanitizePreview.last = n;
   return html;
@@ -1401,7 +1512,7 @@ function renderPool() {
   strip.innerHTML = items.map((p) => `<span class="pd ${provState(p)}" title="${esc(p.name)} · ${provState(p)}${p.lastErr ? ' · ' + esc(p.lastErr) : ''}"><i></i><span>${p.short}</span></span>`).join('');
   list.innerHTML = items.map((p) => {
     const st = provState(p);
-    const label = st === 'off' ? (p.local ? 'off' : hasCreds(p) ? 'off' : 'no key') : st === 'cool' ? `cool ${Math.ceil((p.cooldownUntil - Date.now()) / 1000)}s` : `${Math.round(p.health * 100)}%${p.lat ? ' · ' + p.lat + 'ms' : ''}`;
+    const label = st === 'off' ? (p.local ? 'off' : !hasCreds(p) ? 'no key' : !viaOk(p) ? 'proxy 필요' : 'off') : st === 'cool' ? `cool ${Math.ceil((p.cooldownUntil - Date.now()) / 1000)}s` : `${Math.round(p.health * 100)}%${p.lat ? ' · ' + p.lat + 'ms' : ''}`;
     return `<div class="pr ${st}"><span>${p.short}${p.primary ? ' ★' : ''}</span><span class="st">${label}</span><div class="bar"><b style="width:${st === 'off' ? 0 : Math.round(p.health * 100)}%"></b></div></div>`;
   }).join('');
 }
@@ -1415,7 +1526,7 @@ function renderStatus() {
   const tok = t ? t.messages.reduce((a, m) => a + estTok(m.modelText || m.content), 0) : 0;
   const ready = Object.values(prov).filter((p) => !p.primary && !p.local && usable(p)).length;
   const total = Object.values(prov).filter((p) => !p.primary && !p.local).length;
-  $('#statusLine').innerHTML = `<span>POOL <b>${ready}/${total}</b> ready</span><span>LOCAL <b>${prov.ollama.enabled ? 'ollama on' : 'off'}</b></span><span>CLAUDE <b>${(() => { const c = claudeUse(); return `ZERO-DEFAULT · ${(c.in + c.out).toLocaleString()} tok · 승격 ${c.calls}회`; })()}</b>${usable(prov.claude) ? '' : ' (키 없음)'}</span><span>CTX <b>~${tok.toLocaleString()}</b>/${opts.compressAt.toLocaleString()} tok${t?.summary ? ' · 압축됨' : ''}</span><span>CACHE <b>${LS.get('cidx', []).length}</b> · TTL ${opts.ttl}s</span>`;
+  $('#statusLine').innerHTML = `<span>POOL <b>${ready}/${total}</b> ready</span><span>LOCAL <b>${prov.ollama.enabled ? 'ollama on · 무제한 백업' : 'off'}</b></span><span>CLAUDE <b>${(() => { const c = claudeUse(); return `ZERO-DEFAULT · ${(c.in + c.out).toLocaleString()} tok · 승격 ${c.calls}회`; })()}</b>${usable(prov.claude) ? '' : ' (키 없음)'}</span><span>CTX <b>~${tok.toLocaleString()}</b> tok · 무제한${t?.summary ? ' · 자동 압축됨' : ''}</span><span>CACHE <b>${LS.get('cidx', []).length}</b> · TTL ${opts.ttl}s</span>`;
   $('#modeBadge').textContent = ({ council: 'COUNCIL · ZERO-CLAUDE', fast: 'FAST · ZERO-CLAUDE', claude: 'CLAUDE FINAL PASS', local6: 'LOCAL 6-AGENT · OLLAMA', core: 'CORE · GATEWAY', exec: 'EXEC · LOCAL RUN VERIFY' })[state.mode];
 }
 
@@ -1434,6 +1545,11 @@ function renderSettings() {
   const pool = Object.values(prov).filter((p) => !p.primary && !p.local);
   body.innerHTML = `
     <div class="set-sec"><h4>무료 클라우드 풀 · WEIGHTED ROUND-ROBIN</h4><p>키는 이 브라우저 localStorage에만 저장되고 각 프로바이더로 직접 전송됩니다. 429 → ${opts.cooldown429}s 쿨다운, 5xx/타임아웃 → 즉시 다음 프로바이더로 failover.</p>${rows(pool)}</div>
+    <div class="set-sec"><h4>미디어 · 나레이션 (실사 사진·영상 자동 삽입)</h4><p>홈페이지를 만들면 실사 사진·영상을 자동으로 넣고, STUDIO 홍보영상에 나레이션을 붙입니다. 키가 없으면 Openverse(CC 라이선스 사진, 출처 자동 표기)만 씁니다. 전부 무료 가입으로 받는 키이고 이 브라우저 암호화 금고에만 저장됩니다. 나레이션은 위 Gemini 키(무료 등급)를 먼저 씁니다.</p>
+      ${MEDIA_KEYS.map((m) => `<div class="orow"><span>${esc(m.name)} <small style="color:var(--mut)">${esc(m.note)}</small></span><input type="password" data-mkey="${m.id}" placeholder="${mediaKeys[m.id] ? '저장됨 · …' + esc(mediaKeys[m.id].slice(-4)) + ' (비워두면 유지)' : esc(m.ph)}" autocomplete="off" spellcheck="false"></div>`).join('')}
+      <div class="orow"><span>Azure 지역</span><input type="text" id="optAzureRegion" value="${esc(opts.azureRegion || 'koreacentral')}" spellcheck="false"></div>
+      <div class="orow"><span>현재 사용 경로</span><span style="font:12px var(--mono);color:var(--g1)">${esc(mediaStatusText())}</span></div>
+    </div>
     <div class="set-sec"><h4>로컬 무제한 폴백 · OLLAMA</h4><p>외부 풀이 모두 쿨다운/실패일 때 사용. 실행 전 <code>OLLAMA_ORIGINS=${esc(location.origin)} ollama serve</code> 로 이 사이트를 허용하세요. 코딩: 기본 모델, 라우팅/요약: 경량 모델.</p>${rows([prov.ollama])}<div class="orow"><span></span><span><button type="button" class="btn-sm" id="testOllama">연결 테스트</button> <span id="ollamaRes" style="font:11px var(--mono)"></span></span></div></div>
     <div class="set-sec"><h4>주력 브레인 · CLAUDE (ZERO-CLAUDE 기본)</h4><p>기본은 Claude 0 tok: 캐시 → 무료 풀 → 로컬 Ollama. Claude는 승격 게이트에서만 호출되며 전체 대화 대신 [State Snapshot]+문제 구간만 보내고, 시스템 프롬프트는 Prompt Caching 블록으로 분리합니다. 이번 달 사용: ${(() => { const c = claudeUse(); return `${c.calls}회 · in ${c.in.toLocaleString()} (cache read ${c.cr.toLocaleString()}) / out ${c.out.toLocaleString()} tok`; })()}</p>${rows([prov.claude])}
       <div class="orow"><span>(a) 무료 교차 검증 미해결 시 승격</span><span><input type="checkbox" id="optGateA" ${opts.gateA ? 'checked' : ''} style="width:auto;accent-color:#00FF66"></span></div>
@@ -1446,7 +1562,7 @@ function renderSettings() {
       <div class="orow"><span>컨텍스트 압축 임계 (토큰)</span><input type="number" id="optCompress" value="${opts.compressAt}" min="1000" step="500"></div>
       <div class="orow"><span>압축 시 원문 유지 메시지 수</span><input type="number" id="optKeep" value="${opts.keepRecent}" min="2" max="12"></div>
       <div class="orow"><span>429 쿨다운 (초)</span><input type="number" id="optCool" value="${opts.cooldown429}" min="10"></div>
-      <div class="orow"><span>내장 무료 Gemini 일일 한도</span><span style="font:12px var(--mono);color:var(--g1)">${freeUse()} / ${FREE_DAILY_CAP} (브라우저별)</span></div>
+      <div class="orow"><span>내장 무료 Gemini</span><span style="font:12px var(--mono);color:var(--g1)">앱 한도 없음 · 오늘 ${freeUse()}회 · Google 무료 할당량을 넘으면 다른 경로로 자동 전환</span></div>
     </div>`;
   $('#testOllama').onclick = async () => {
     const base = $('.prow[data-id=ollama] [data-f=base]').value.replace(/\/v1\/?$/, '').replace(/\/$/, '');
@@ -1469,11 +1585,15 @@ function collectSettings() {
   opts.claudeMonthlyCap = Math.max(0, Number($('#optClaudeCap').value) || 0);
   opts.claudeMaxOut = Math.max(500, Math.min(16000, Number($('#optClaudeOut').value) || 6000));
   opts.ttl = Math.max(0, Number($('#optTtl').value) || 86400);
-  opts.compressAt = Math.max(1000, Number($('#optCompress').value) || 6000);
+  opts.compressAt = Math.max(1000, Number($('#optCompress').value) || 16000);
   opts.keepRecent = Math.max(2, Math.min(12, Number($('#optKeep').value) || 4));
   opts.cooldown429 = Math.max(10, Number($('#optCool').value) || 60);
+  $$('#setBody [data-mkey]').forEach((inp) => { const v = inp.value.trim(); if (!v) return; mediaKeys[inp.dataset.mkey] = v; loadCloud().then((c) => c.vault.put('media:' + inp.dataset.mkey, v)).catch((e) => console.warn('media vault save', e)); });
+  if ($('#optAzureRegion')) opts.azureRegion = $('#optAzureRegion').value.trim() || 'koreacentral';
+  applyMediaKeys();
   LS.set('opts', opts); saveProviders(); saveHealth();
   renderPool(); renderRouteSel(); renderStatus();
+  refreshModels(true);
 }
 
 /* ================= AUTH (Firebase email/OAuth + local guest) ================= */
@@ -1807,7 +1927,7 @@ function wire() {
   if (window.DarkFX) {
     const T = DarkFX.telemetry;
     T.providers = () => Object.values(prov).map((p) => ({ id: p.id, short: p.short, state: provState(p), health: p.health, lat: p.lat, primary: !!p.primary, local: !!p.local }));
-    T.claude = claudeUse; T.free = () => [freeUse(), FREE_DAILY_CAP]; T.cacheSize = () => LS.get('cidx', []).length;
+    T.claude = claudeUse; T.free = () => [freeUse(), '∞']; T.cacheSize = () => LS.get('cidx', []).length;
     dashboard = new DarkFX.Dashboard(); dashboard.mount();
     waterfall = new DarkFX.CodeWaterfall($('#wfCanvas'), () => (artifacts?.files || []).flatMap((f) => ['// ──── ' + f.name + ' ────', ...f.code.split('\n')]).filter((l) => l.trim()).slice(0, 4000));
   }
@@ -1948,7 +2068,8 @@ function wire() {
 wire();
 (async () => {
   const g = getSession();
-  loadVaultKeys().then(() => { renderPool(); renderRouteSel(); renderStatus(); });
+  loadVaultKeys().then(async () => { renderPool(); renderRouteSel(); renderStatus(); await loadMediaKeys(); refreshModels(); });
+  autoLocal();
   if (g?.guest) { user = g; $('#gate').hidden = true; $('#app').hidden = false; enterWorkspace(); return; }
   showGate();
   try {
