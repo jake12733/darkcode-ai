@@ -567,3 +567,4 @@ table.proc{width:100%;border-collapse:collapse;font:11px/1 var(--mono);table-lay
 .core-steps{margin:10px 0 6px;padding-left:20px;font-size:13px;line-height:1.9;color:var(--txt)}
 .core-steps a.btn-neon{text-decoration:none;display:inline-flex;margin-right:6px}
 .core-steps code{font:11.5px var(--mono);color:var(--neon);background:#000;border:1px solid var(--line2);border-radius:6px;padding:2px 6px}
+.core-diag{margin:10px 0 0;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-all;font:11.5px/1.6 var(--mono);color:#bff5d2;background:#000;border:1px solid var(--line2);border-radius:9px;padding:10px 12px}
