@@ -166,7 +166,7 @@ function renderAccepted() {
       <b>호스트 에이전트 페어링 · 입력 제어용</b>
       <p>마우스·키보드 제어는 이 PC에서 <code>host_agent.py</code>를 직접 실행한 경우에만 가능합니다. 에이전트 창에 표시된 6자리 코드를 입력한 뒤, 에이전트 창에서 한 번 더 <code>y</code>로 확인하세요. 에이전트가 없으면 요청자는 화면만 볼 수 있습니다. 브라우저가 "로컬 네트워크 접근"을 물으면 허용해야 연결됩니다.</p>
       <div class="ag-row"><input id="agCode" inputmode="numeric" maxlength="6" placeholder="페어링 코드 6자리" autocomplete="off"><input id="agPort" inputmode="numeric" maxlength="5" value="47615" title="에이전트 포트"><button class="btn-sm" id="agGo">연결</button></div>
-      <div class="ag-links"><a href="agent/host_agent.py" download>host_agent.py 받기</a> · <a href="https://github.com/jake12733/polyship-ai-terminal/blob/main/agent/README.md" target="_blank" rel="noopener noreferrer">설치 안내 ↗</a></div>
+      <div class="ag-links"><a href="agent/host_agent.py" download>host_agent.py 받기</a> · <a href="https://github.com/jake12733/darkcode-ai/blob/main/agent/README.md" target="_blank" rel="noopener noreferrer">설치 안내 ↗</a></div>
     </div>` : ''}
     <div class="evlog" id="evLog"><div class="mut">요청자가 보내는 입력 이벤트가 여기에 모두 표시됩니다.</div></div>` : ''}
     <div class="log" id="log"></div>

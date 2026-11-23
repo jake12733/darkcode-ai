@@ -11,7 +11,7 @@
   var LS_CONNECTOR = 'dc-l6-connector';
   var LS_USED = 'dc-l6-used';
   var MODELS = ['ai-router', 'ai-music', 'ai-dev', 'ai-media', 'ai-qa', 'ai-critic'];
-  var SITE_BASE = 'https://jake12733.github.io/polyship-ai-terminal/';
+  var SITE_BASE = 'https://jake12733.github.io/darkcode-ai/';
   var CMD_WIN = 'powershell -ExecutionPolicy Bypass -c "irm ' + SITE_BASE + 'connect/win.txt|iex"';
   var CMD_UNIX = 'curl -fsSL ' + SITE_BASE + 'connect/unix.sh | sh';
 
