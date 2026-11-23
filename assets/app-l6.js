@@ -1619,8 +1619,8 @@ function wire() {
     ta.value = ''; autoGrow(); $('#sendBtn').disabled = true;
     execute(v);
   });
-  $('#modeSeg button').forEach((b) => (b.onclick = () => {
-    state.mode = b.dataset.mode; $('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b)); renderStatus();
+  $$('#modeSeg button').forEach((b) => (b.onclick = () => {
+    state.mode = b.dataset.mode; $$('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b)); renderStatus();
     if (state.mode === 'local6' && window.DCLocal6) DCLocal6.check().then((s) => { if (!s.ok) DCLocal6.open(); else toast('로컬 6-에이전트 · Ollama 모델 6/6 연결됨'); });
   }));
   $('#routeSel').onchange = (e) => { state.route = e.target.value; toast(state.route === 'auto' ? 'AUTO 라운드로빈' : `${prov[state.route].name} 고정 (실패 시 로컬/Claude 폴백)`); };
