@@ -1025,6 +1025,7 @@ async function runExec(prompt, run, thread) {
     if (window.DCLocal6) DCLocal6.open();
     st = await execWait(() => AX.check(), (s) => s.models.ok, run.signal, 0);
     run.log(`exec   Ollama 연결됨 · 모델 ${st.models.names.length}개`, 'ok');
+    const l6d = document.getElementById('l6dlg'); if (l6d && l6d.open) l6d.close();
   }
   if (!st.runner.ok) {
     run.log(`exec   실행기(${st.runnerUrl}) 응답 없음 → darkcode-core 폴더의 start-runner.bat 실행, 켜지면 자동으로 이어서 (최대 90초 · 중단 ■)`, 'warn');
