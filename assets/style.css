@@ -546,3 +546,17 @@ table.proc{width:100%;border-collapse:collapse;font:11px/1 var(--mono);table-lay
 .l6-ask b{color:#fde68a;font-size:14px}
 .l6-ask p{margin:6px 0 10px;font-size:12.5px;line-height:1.6;color:var(--txt)}
 .l6-ask-btns{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ===== PREVIEW: generating overlay ===== */
+#pvStage{position:relative}
+.pv-gen{position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:radial-gradient(800px 400px at 50% 0%,rgba(0,255,102,.10),transparent 60%),#020503;padding:18px}
+.pv-gen[hidden]{display:none!important}
+.pg-box{width:min(560px,100%);display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px}
+.pg-spin{width:46px;height:46px;border-radius:50%;border:3px solid rgba(0,255,102,.15);border-top-color:var(--neon);animation:pgspin .9s linear infinite;box-shadow:0 0 24px rgba(0,255,102,.25)}
+@keyframes pgspin{to{transform:rotate(360deg)}}
+.pg-title{font:700 15px var(--mono);letter-spacing:.08em;color:var(--neon)}
+.pg-q{margin:0;font-size:15px;color:#eafff1;line-height:1.6;max-height:4.8em;overflow:hidden}
+.pg-stage{font:11px var(--mono);color:var(--mut);letter-spacing:.1em}
+.pg-tail{width:100%;height:180px;margin:6px 0 0;overflow:hidden;white-space:pre-wrap;word-break:break-all;text-align:left;font:11px/1.5 var(--mono);color:#3fbf73;background:#000;border:1px solid var(--line);border-radius:10px;padding:10px;-webkit-mask-image:linear-gradient(180deg,transparent,#000 35%)}
+.pv-gen.err .pg-spin{border-top-color:var(--err);animation:none}
+.pv-gen.err .pg-title{color:var(--err)}

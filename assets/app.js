@@ -573,6 +573,8 @@ async function execute(prompt, { noCache = false } = {}) {
 
   setCenterView('work');
   const run = createRunUI(mode);
+  run.prompt = prompt;
+  previewLoading(run, prompt, mode);
   state.running = run;
   setRunning(true);
   try {
@@ -599,6 +601,7 @@ async function execute(prompt, { noCache = false } = {}) {
         if (ctx.compressed) { run.compressed = true; const real = curThread(); if (real) real.summary = thread.summary; }
         modelText = mode === 'fast' ? await runFast(prompt, ctx.messages, run, thread) : await runCouncil(prompt, ctx.messages, run, thread, mode === 'claude');
       }
+      if (mode !== 'image') modelText = await completeHtml(run, prompt, modelText);
       cachePut(key, { modelText, calls: run.calls });
       run.log(`cache  store key=${key}`, 't');
     }
@@ -620,6 +623,7 @@ async function execute(prompt, { noCache = false } = {}) {
     const aborted = e.kind === 'abort';
     run.log(aborted ? 'abort  사용자 중단' : `error  ${e.message}`, aborted ? 'warn' : 'err');
     run.finish(false);
+    previewError(aborted ? '작업을 중단했습니다.' : e.message);
     state.running = null;
     const t = curThread() || thread;
     t.messages.push({ role: 'assistant', content: aborted ? '> 작업을 중단했습니다.' : `> **실행 실패** · ${e.message}\n\n설정(⚙)에서 무료 풀 API 키를 추가하거나, 로컬 Ollama를 켜면 자동으로 다음 경로로 이어집니다.`, error: true, t: Date.now(), meta: { lines: run.lines, ms: performance.now() - run.t0, mode } });
@@ -702,18 +706,141 @@ async function verifyLoop(run, prompt, text, { llm = true, avoid = [] } = {}) {
     if (round === 1) break;
     run.log('repair 무료 모델로 1회 수정 시도', 'k');
     try {
-      const fx = await callTracked(run, { role: 'code', label: 'repair', system: SYSTEM_CORE, avoid, messages: [{ role: 'user', content: `요청:\n${prompt}\n\n[현재 최종안]\n${cur.slice(0, 26000)}\n\n[검증 문제]\n${issues.join('\n')}\n\n문제만 정확히 고친 최종본을 응답 형식 그대로 전체 다시 작성하십시오. 코드는 생략 없이.` }], maxTokens: 8192, temperature: 0.3 });
+      const fx = await callTracked(run, { role: 'code', label: 'repair', system: SYSTEM_CORE, avoid, messages: [{ role: 'user', content: `요청:\n${prompt}\n\n[현재 최종안]\n${cur.slice(0, 26000)}\n\n[검증 문제]\n${issues.join('\n')}\n\n문제만 정확히 고친 최종본을 응답 형식 그대로 전체 다시 작성하십시오. 코드는 생략 없이.` }], maxTokens: 16384, temperature: 0.3 });
       cur = fx.text;
     } catch (e) { if (e.kind === 'abort') throw e; run.log('repair 실패', 'warn'); break; }
   }
   return { text: cur, unresolved: issues.length > 0, issues };
 }
 
+/* ---------- HTML 완결성 검사 · 이어쓰기 (미리보기 백지 방지) ---------- */
+function htmlIssues(code) {
+  const c = String(code || '');
+  const lc = c.toLowerCase();
+  const issues = [];
+  const cnt = (re) => (lc.match(re) || []).length;
+  if (cnt(/<style[\s>]/g) > cnt(/<\/style>/g)) issues.push('style');
+  if (cnt(/<script[\s>]/g) > cnt(/<\/script>/g)) issues.push('script');
+  if (/<html[\s>]|<!doctype/i.test(c) && !/<\/html>\s*$/i.test(c.trim())) issues.push('html');
+  const body = (c.match(/<body[^>]*>([\s\S]*)/i) || [null, null])[1];
+  if (/<head[\s>]/i.test(c) && body === null) issues.push('nobody');
+  else if (body !== null) {
+    const visible = body.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, '').trim();
+    if (!visible && !/<(canvas|svg|img|video|input|button)\b/i.test(body)) issues.push('empty');
+  }
+  return issues;
+}
+function repairHtml(code) {
+  let c = String(code || '');
+  const lc = c.toLowerCase();
+  const n = (re) => (lc.match(re) || []).length;
+  if (n(/<style[\s>]/g) > n(/<\/style>/g)) c += '\n</style>';
+  if (n(/<script[\s>]/g) > n(/<\/script>/g)) c += '\n</script>';
+  if (/<head[\s>]/i.test(c) && !/<\/head>/i.test(c)) c += '\n</head><body></body>';
+  if (/<body[\s>]/i.test(c) && !/<\/body>/i.test(c)) c += '\n</body>';
+  if (/<html[\s>]/i.test(c) && !/<\/html>/i.test(c)) c += '\n</html>';
+  return c;
+}
+// 응답 속 마지막 html 코드 블록 (닫는 펜스가 없으면 끝까지)
+function lastHtmlBlock(text) {
+  const re = /```html[^\n]*\n/gi; let m, last = null;
+  while ((m = re.exec(text))) last = m;
+  if (!last) return null;
+  const start = last.index + last[0].length;
+  const close = text.indexOf('\n```', start - 1);
+  const end = close === -1 ? text.length : close;
+  return { start, end, closed: close !== -1, code: text.slice(start, end) };
+}
+async function completeHtml(run, prompt, text) {
+  let cur = text;
+  for (let round = 1; round <= 2; round++) {
+    const b = lastHtmlBlock(cur);
+    if (!b) return cur;
+    const issues = htmlIssues(b.code);
+    if (!issues.length) { if (round > 1) run.log('verify html 이어쓰기 완료 · 문서 완결', 'ok'); return cur; }
+    run.log(`repair html 잘림 감지 (${issues.join(', ')}) → 끊긴 지점부터 이어쓰기 ${round}회차`, 'warn');
+    let cont;
+    try {
+      if (run.mode === 'local6' && window.DCLocal6) {
+        const res = await fetch(DCLocal6.host() + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: run.signal,
+          body: JSON.stringify({ model: 'ai-dev', stream: false, think: false, keep_alive: 0, messages: [{ role: 'user', content: `사용자 요청:\n${prompt}\n\n아래 HTML 파일이 중간에 끊겼습니다. 마지막 글자 바로 다음부터 이어서 </html>까지 완성하십시오. 이미 쓴 부분 반복, 설명, 코드 펜스 금지.\n\n[끊긴 파일의 마지막 부분]\n${b.code.slice(-4000)}` }] }) });
+        cont = (await res.json()).message?.content || '';
+        run.calls.push({ label: 'html-continue', provider: 'Ollama', short: 'AI-DEV', pid: 'local6', model: 'ai-dev' });
+      } else {
+        const r = await callTracked(run, {
+          role: 'code', label: 'html-continue',
+          system: '당신은 코드 이어쓰기 도우미입니다. 끊긴 HTML 파일의 바로 다음 글자부터 파일 끝까지 이어질 코드만 출력합니다. 이미 있는 부분 반복, 설명, 코드 펜스(```) 금지.',
+          messages: [{ role: 'user', content: `사용자 요청:\n${prompt}\n\n아래 HTML 파일이 중간에 끊겼습니다. 마지막 글자 바로 다음부터 이어서 </html>까지 완성하십시오. 아직 열려 있는 <style>/<script>를 닫고, 본문(<body>) 내용까지 빠짐없이 작성하십시오.\n\n[끊긴 파일의 마지막 부분]\n${b.code.slice(-4000)}` }],
+          maxTokens: 16384, temperature: 0.2,
+        });
+        cont = r.text;
+      }
+    } catch (e) { if (e.kind === 'abort' || e.name === 'AbortError') throw e; run.log('repair html 이어쓰기 실패 → 미리보기에서 자동 복구', 'warn'); return cur; }
+    cont = String(cont).replace(/^\s*<think>[\s\S]*?<\/think>\s*/, '').replace(/^\s*```[\w-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
+    const tail = b.code.slice(-600);
+    for (let k = Math.min(400, tail.length, cont.length); k >= 20; k--) { if (tail.endsWith(cont.slice(0, k))) { cont = cont.slice(k); break; } }
+    const joined = b.code.replace(/\s+$/, '') + '\n' + cont.replace(/^\s+/, '');
+    cur = cur.slice(0, b.start) + joined + (b.closed ? '' : '\n```\n') + cur.slice(b.end);
+  }
+  return cur;
+}
+
+/* ---------- 미리보기: 생성 중 화면 · 답변 카드 ---------- */
+function previewOverlay() {
+  let ov = $('#pvGen');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'pvGen'; ov.className = 'pv-gen';
+    ov.innerHTML = '<div class="pg-box"><div class="pg-spin"></div><b class="pg-title">생성 중</b><p class="pg-q"></p><div class="pg-stage"></div><pre class="pg-tail"></pre></div>';
+    $('#pvStage').append(ov);
+  }
+  return ov;
+}
+function previewLoading(run, prompt, mode) {
+  const ov = previewOverlay();
+  ov.hidden = false; ov.classList.remove('err');
+  $('.pg-title', ov).textContent = ({ local6: '로컬 6-에이전트가 만드는 중', image: '이미지 생성 중', fast: '빠르게 만드는 중', claude: 'Claude Final Pass 진행 중' })[mode] || '멀티 AI가 만드는 중';
+  $('.pg-q', ov).textContent = prompt;
+  $('.pg-stage', ov).textContent = '준비 중...';
+  $('.pg-tail', ov).textContent = '';
+  $('#pvUrl').textContent = 'preview://generating';
+  switchTab('preview'); showRight(true);
+  const origStage = run.stage, origRain = run.rain;
+  let buf = '';
+  run.stage = function (name) { origStage.call(run, name); $('.pg-stage', ov).textContent = '단계: ' + name; };
+  run.rain = function (text) { origRain.call(run, text); buf = (buf + text).slice(-1400); $('.pg-tail', ov).textContent = buf; };
+}
+function previewDone() { const ov = $('#pvGen'); if (ov) ov.hidden = true; }
+function previewError(msg) {
+  const ov = previewOverlay();
+  ov.hidden = false; ov.classList.add('err');
+  $('.pg-title', ov).textContent = '실행이 멈췄어요';
+  $('.pg-stage', ov).textContent = msg || '';
+  setTimeout(() => { if (!state.running) ov.hidden = true; }, 4000);
+}
+function answerPage(a, notice) {
+  const q = esc(a.question || a.title || '');
+  const body = DOMPurify.sanitize(marked.parse(a.doc || '(답변 없음)'));
+  const css = `*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 80% -10%,rgba(0,255,102,.10),transparent 60%),#030605;color:#dff7e8;font:16px/1.8 'Pretendard Variable',Pretendard,system-ui,-apple-system,'Segoe UI',sans-serif;padding:clamp(16px,4vw,44px)}
+.wrap{max-width:860px;margin:0 auto}.tag{display:inline-flex;gap:8px;align-items:center;font:700 11px/1 ui-monospace,Consolas,monospace;letter-spacing:.16em;color:#00FF66;border:1px solid rgba(0,255,102,.35);border-radius:999px;padding:7px 12px;background:rgba(0,255,102,.06)}
+.tag i{width:7px;height:7px;border-radius:50%;background:#00FF66;box-shadow:0 0 10px #00FF66}
+h1.q{font-size:clamp(22px,3.2vw,32px);line-height:1.35;margin:16px 0 22px;color:#fff;letter-spacing:-.01em}
+.card{background:linear-gradient(180deg,rgba(10,22,15,.92),rgba(5,12,8,.92));border:1px solid rgba(0,255,102,.22);border-radius:18px;padding:clamp(18px,3vw,32px);box-shadow:0 20px 60px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.4)}
+.card>:first-child{margin-top:0}.lead{font-size:13px;color:#7fa58c;margin:0 0 10px;font-family:ui-monospace,Consolas,monospace;letter-spacing:.08em}
+h1,h2,h3,h4{color:#00FF66;line-height:1.4;margin:1.4em 0 .5em}h2{font-size:20px}h3{font-size:17px}p{margin:.6em 0}strong{color:#fff}a{color:#00FF66}
+ul,ol{padding-left:22px}li{margin:.25em 0}blockquote{margin:1em 0;padding:8px 16px;border-left:3px solid #16A34A;background:rgba(0,255,102,.05);border-radius:0 10px 10px 0;color:#bfe9cf}
+code{font-family:ui-monospace,'JetBrains Mono',Consolas,monospace;font-size:.88em;background:rgba(0,255,102,.08);border:1px solid rgba(0,255,102,.18);border-radius:6px;padding:1px 6px;color:#a7ffc9}
+pre{background:#010402;border:1px solid #143322;border-radius:12px;padding:16px;overflow:auto}pre code{background:none;border:0;padding:0;color:#cfffe0}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:14.5px;display:block;overflow-x:auto}th,td{border:1px solid #1b3a27;padding:8px 12px;text-align:left;vertical-align:top}th{background:rgba(0,255,102,.08);color:#00FF66}
+img{max-width:100%;border-radius:12px}.notice{margin:0 0 16px;padding:10px 14px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.06);border-radius:10px;color:#fde68a;font-size:13.5px}
+.foot{margin-top:22px;font:11px ui-monospace,Consolas,monospace;color:#4f6e5a;letter-spacing:.1em}`;
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${q}</title><style>${css}</style></head><body><div class="wrap"><span class="tag"><i></i>DARK CODE AI · 답변</span><h1 class="q">${q}</h1>${notice ? `<div class="notice">${esc(notice)}</div>` : ''}<div class="card"><p class="lead">ANSWER</p>${body}</div><div class="foot">DARK CODE AI · ${esc(new Date().toLocaleString('ko-KR'))}</div></div></body></html>`;
+}
+
 async function runFast(prompt, history, run, thread) {
   run.stage('ROUTE');
   run.log('stage  Zero-Claude · 캐시 → 무료 풀(WRR) → 로컬 Ollama 순서', 'k');
   run.stage('GENERATE');
-  const r = await callTracked(run, { role: 'general', label: 'generate', system: SYSTEM_CORE, messages: [...history, { role: 'user', content: prompt }] });
+  const r = await callTracked(run, { role: 'general', label: 'generate', system: SYSTEM_CORE, messages: [...history, { role: 'user', content: prompt }], maxTokens: 16384 });
   run.stage('VERIFY');
   const v = await verifyLoop(run, prompt, r.text, { llm: false, avoid: [r.provider.id] });
   run.stage('GATE');
@@ -731,7 +858,7 @@ async function runCouncil(prompt, history, run, thread, forceClaude) {
   const s = await callTracked(run, { role: 'plan', label: 'strategist', system: ROLE_PROMPTS.strategist, messages: [...hist, { role: 'user', content: prompt }], maxTokens: 1200, temperature: 0.5 });
   run.stage('IMPLEMENTER');
   run.log('stage  [구현자] 산출물 초안 생성 (code 선호, 전략가와 다른 모델 우대)', 'k');
-  const impl = await callTracked(run, { role: 'code', label: 'implementer', system: ROLE_PROMPTS.implementer, avoid: [s.provider.id], messages: [...hist, { role: 'user', content: `요청:\n${prompt}\n\n[전략가 설계]\n${s.text}` }], maxTokens: 8192, temperature: 0.5 });
+  const impl = await callTracked(run, { role: 'code', label: 'implementer', system: ROLE_PROMPTS.implementer, avoid: [s.provider.id], messages: [...hist, { role: 'user', content: `요청:\n${prompt}\n\n[전략가 설계]\n${s.text}` }], maxTokens: 16384, temperature: 0.5 });
   run.stage('CRITIC');
   run.log('stage  [비판가] 한도/오류/함정 교차 검증 (verify 선호: OpenRouter, 구현자와 다른 모델 우대)', 'k');
   const c = await callTracked(run, { role: 'verify', label: 'critic', system: ROLE_PROMPTS.critic, avoid: [impl.provider.id], messages: [{ role: 'user', content: `요청:\n${prompt}\n\n[초안]\n${impl.text.slice(0, 24000)}` }], maxTokens: 1200, temperature: 0.3 });
@@ -754,7 +881,7 @@ async function runCouncil(prompt, history, run, thread, forceClaude) {
   const synth = await callTracked(run, {
     role: 'synth', label: 'synth', system: SYSTEM_CORE,
     messages: [...hist, { role: 'user', content: `사용자 요청:\n${prompt}\n\n[전략가 설계]\n${s.text}\n\n[구현자 초안]\n${impl.text.slice(0, 30000)}\n\n[비판가 지적]\n${c.text}\n\n위 세 관점을 통합해 모순과 누락을 제거한 최종 결과물을 응답 형식 그대로 작성하십시오. 비판가의 타당한 지적은 수정해 반영하고, 코드는 생략 없이 완성본으로 다시 쓰십시오.` }],
-    maxTokens: 8192, temperature: 0.4,
+    maxTokens: 16384, temperature: 0.4,
   });
   run.stage('VERIFY');
   const v = await verifyLoop(run, prompt, synth.text, { llm: true, avoid: [synth.provider.id] });
@@ -886,7 +1013,7 @@ function buildArtifacts(sec, snap, thread, run) {
   const title = thread.title || '제목 없는 문서';
   const rs = routeSummary(run);
   const snapshot = `# STATE SNAPSHOT · ${new Date().toLocaleString('ko-KR')}\n${snap}\n\n# ROUTE\npath: "${rs.path}"\ncalls:\n${rs.used.map((u) => `  - ${u}`).join('\n') || '  - (cache)'}\n\n# COMPRESSED CONTEXT\n${thread.summary?.text || '(아직 압축 임계 미만)'}\n\n# CACHE\nentries: ${LS.get('cidx', []).length}\nttl: ${opts.ttl}s`;
-  return { title, doc: sec.deliverable || '', files, img, snapshot };
+  return { title, question: run.prompt || title, doc: sec.deliverable || '', files, img, snapshot };
 }
 let artifacts = null;
 function applyArtifacts(a, auto) {
@@ -904,10 +1031,10 @@ function applyArtifacts(a, auto) {
   renderFiles();
   $('#snapView').textContent = a.snapshot;
   setPreview(buildPreviewDoc(a));
+  previewDone();
   updateTabCounts(); updateFoot();
   if (auto) {
-    const tab = a.files.some((f) => f.lang === 'html') || a.img ? 'preview' : a.files.length ? 'code' : 'doc';
-    switchTab(tab); showRight(true);
+    switchTab('preview'); showRight(true);
   }
 }
 function renderFiles() {
@@ -940,10 +1067,13 @@ function buildPreviewDoc(a) {
     if (css && /<link[^>]+style\.css/i.test(doc)) doc = doc.replace(/<link[^>]+style\.css[^>]*>/i, `<style>${css}</style>`);
     else if (css && !doc.includes(css.slice(0, 40))) doc = doc.replace(/<\/head>/i, `<style>${css}</style></head>`);
     if (js) { doc = doc.replace(/<script[^>]+src=["'][^"']*(app|script|main)\.js["'][^>]*><\/script>/i, ''); if (!doc.includes(js.slice(0, 40))) doc = doc.replace(/<\/body>/i, `<script>${js}<\/script></body>`); }
+    if (htmlIssues(doc).length) {
+      doc = repairHtml(doc);
+      if (htmlIssues(doc).some((x) => x === 'empty' || x === 'nobody')) return answerPage(a, '생성된 HTML이 불완전해서 답변 내용으로 표시합니다. 대화창의 [다시 실행]을 누르면 새로 만듭니다.');
+    }
     return sanitizePreview(doc);
   }
-  const body = DOMPurify.sanitize(marked.parse(a.doc || ''));
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:28px;background:#000;color:#d7f5e1;font:15px/1.75 system-ui,sans-serif}h1,h2,h3{color:#00FF66}pre{background:#031008;border:1px solid #11261a;padding:12px;border-radius:8px;overflow:auto}code{color:#a7ffc9}a{color:#00FF66}table{border-collapse:collapse}td,th{border:1px solid #1b3a27;padding:6px 10px}</style></head><body>${body}</body></html>`;
+  return answerPage(a);
 }
 function setPreview(doc) {
   const fr = $('#pvFrame');
