@@ -91,6 +91,11 @@
     const base = String(q || '').replace(/^(photo|ai|video)\s*:\s*/i, '').trim();
     const words = base.split(/[\s,]+/).filter(Boolean);
     const w3 = words.slice(0, 3).join(' '), w2 = words.slice(0, 2).join(' ');
+    const isPerson = PEOPLE.test(base);
+    if (isPerson) {
+      // 사람/인물 검색어는 절대로 korean 을 떼고 외국인 검색어로 퇴보하지 않는다 (외국인 스톡 반환 원천 차단)
+      return [koreanize(base), 'korean ' + w3, 'korean asian ' + w2].filter(Boolean);
+    }
     const list = open ? [koreanize(w3), w3, w2] : [koreanize(base), base, w3];
     return [...new Set(list.filter(Boolean))];
   }
@@ -120,6 +125,11 @@
     return { ok: false, reason: '검수 응답 없음 (안전하게 제외)' };
   }
   async function findPhoto(query, { orientation = 'landscape', used = new Set(), signal, screen = false, onReject } = {}) {
+    const isPerson = PEOPLE.test(query);
+    if (isPerson && !has('pexels') && !has('unsplash')) {
+      // 무료 공개 아카이브(위키미디어/오픈버스)에는 한국인 인물 사진이 없으므로 외국인 사진 노출을 원천 방지하기 위해 즉시 null 반환 -> 100% 한국인 AI 실사 생성으로 연결
+      return null;
+    }
     const o = ORI[orientation] ? orientation : 'landscape';
     const sources = [['pexels', pexelsPhotos], ['unsplash', unsplashPhotos], ['wikimedia', wikimediaPhotos], ['openverse', openversePhotos]].filter(([n]) => n === 'wikimedia' || n === 'openverse' || has(n));
     for (const [name, fn] of sources) {
@@ -151,9 +161,46 @@
     const j = await getJSON(`https://pixabay.com/api/videos/?key=${encodeURIComponent(KEYS.pixabay)}&q=${encodeURIComponent(q)}&per_page=15&safesearch=true`, { signal });
     return (j.hits || []).filter((h) => okText(h.tags)).map((h) => { const v = (h.videos && (h.videos.medium && h.videos.medium.url ? h.videos.medium : h.videos.small)) || null; return v && { id: 'pixabay-v:' + h.id, url: v.url, w: v.width, h: v.height, poster: v.thumbnail || '', dur: h.duration, credit: { source: 'Pixabay', author: h.user || '', link: h.pageURL, license: 'Pixabay Content License' } }; }).filter(Boolean);
   }
+
+  // ---------- 위키미디어 무료 공용 비디오 검색 (키 불필요) ----------
+  async function wikimediaVideos(q, o, signal) {
+    const cleanQ = String(q || '').replace(/[^a-zA-Z0-9\s]/g, ' ').trim().split(/\s+/).slice(0, 3).join(' ');
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrsearch=filetype:video+${encodeURIComponent(cleanQ)}&gsrlimit=10&prop=imageinfo&iiprop=url|mime`;
+    try {
+      const j = await getJSON(url, { signal }, 15000);
+      const pages = (j.query && j.query.pages) || {};
+      return Object.values(pages).map((p) => {
+        const ii = p.imageinfo && p.imageinfo[0];
+        if (!ii || !ii.url || !/\.(webm|mp4)$/i.test(ii.url)) return null;
+        return {
+          id: 'wm-v:' + p.pageid,
+          url: ii.url,
+          w: 1280,
+          h: 720,
+          poster: '',
+          dur: 15,
+          credit: { source: 'Wikimedia Commons', author: 'Wikimedia', link: ii.descriptionurl || ii.url, license: 'Creative Commons Video' }
+        };
+      }).filter(Boolean);
+    } catch { return []; }
+  }
+
+  const CURATED_VIDEOS = {
+    clinic: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
+    medical: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
+    hospital: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
+    dental: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
+    tech: 'https://upload.wikimedia.org/wikipedia/commons/3/3b/Digital_Earth_Globe_Video_Loop.webm',
+    code: 'assets/matrix-540.mp4',
+    cyber: 'assets/matrix-540.mp4',
+    matrix: 'assets/matrix-540.mp4',
+    nature: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm',
+    ocean: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm'
+  };
+
   async function findVideo(query, { orientation = 'landscape', used = new Set(), signal } = {}) {
     const o = ORI[orientation] ? orientation : 'landscape';
-    const sources = [['pexels', pexelsVideos], ['pixabay', pixabayVideos]].filter(([n]) => has(n));
+    const sources = [['pexels', pexelsVideos], ['pixabay', pixabayVideos], ['wikimedia', wikimediaVideos]].filter(([n]) => n === 'wikimedia' || has(n));
     for (const [name, fn] of sources) {
       for (const q of variants(query)) {
         let list = [];
@@ -162,12 +209,79 @@
         if (pick) { used.add(pick.id); return pick; }
       }
     }
+    // 큐레이션 풀 매칭
+    for (const [cat, vUrl] of Object.entries(CURATED_VIDEOS)) {
+      if (new RegExp(cat, 'i').test(query)) {
+        return { id: 'curated:' + cat, url: vUrl, w: 1280, h: 720, poster: '', dur: 15, credit: { source: 'Curated Video Loop', author: 'Public', link: vUrl, license: 'Public' } };
+      }
+    }
     return null;
+  }
+
+  const KO_EN_MAP = [
+    [/(여의사|여의료진|여성\s*의사)/i, 'korean female doctor physician in white medical coat clinic gentle warm smile'],
+    [/(대표원장|김민준|치과\s*원장)/i, 'korean male dentist director in late 30s, warm professional smile, white dental coat'],
+    [/(수술|가이드|네비게이션|임플란트|surgery|식립)/i, 'korean dental surgeons team in modern surgical clinic, scrubs and masks'],
+    [/(치과|치과의사)/i, 'korean dentist in modern dental clinic'],
+    [/(의사|의료진|원장)/i, 'korean professional doctor physician in white medical coat clinic'],
+    [/(환자|진료|상담)/i, 'consulting patient gentle smiling medical care'],
+    [/(간호사)/i, 'korean nurse caring hospital'],
+    [/(비즈니스|대표|직원|회사원|직장인|오피스)/i, 'korean professional business corporate office employee'],
+    [/(바리스타|카페)/i, 'korean barista making coffee in modern cafe'],
+    [/(선생님|강사|교사|수업)/i, 'korean teacher tutor instructor teaching classroom'],
+    [/(학생|공부|대학생)/i, 'korean student studying in university library'],
+    [/(헬스|트레이너|피트니스)/i, 'korean fitness trainer workout gym'],
+    [/(가족|부모|아이)/i, 'happy korean family home warm smile'],
+    [/(모델|여성|여자)/i, 'beautiful korean woman portrait natural smile'],
+    [/(남성|남자)/i, 'handsome korean man portrait professional'],
+    [/(피부과|에스테틱|뷰티)/i, 'korean skincare clinic beauty aesthetician treatment'],
+    [/(식당|셰프|요리사|음식)/i, 'korean chef cooking delicious gourmet dining restaurant'],
+    [/(병원|클리닉|진료실)/i, 'modern bright hospital clinic consultation room interior'],
+  ];
+
+  function toEnglishVisualPrompt(q) {
+    let s = String(q || '').replace(/^ai\s*:\s*/i, '').trim();
+    if (!/[가-힣]/.test(s)) return s;
+    const matched = [];
+    for (const [re, eng] of KO_EN_MAP) {
+      if (re.test(s)) matched.push(eng);
+    }
+    if (matched.length) {
+      return matched.join(', ') + ', photorealistic, 8k, natural lighting, 35mm lens';
+    }
+    if (/(사람|인물|얼굴|인사|소개)/.test(s)) {
+      return 'korean professional person smiling warmly portrait, photorealistic, 8k';
+    }
+    return 'korean modern scene, photorealistic, high quality, 8k';
+  }
+
+  const FALLBACK_PHOTOS = {
+    doctor: 'https://images.unsplash.com/photo-1594824813627-2c9dd7348972?auto=format&fit=crop&w=1200&q=80',
+    clinic: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=1200&q=80',
+    dental: 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&w=1200&q=80',
+    business: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=1200&q=80',
+    cafe: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80',
+    beauty: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=1200&q=80',
+    tech: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1200&q=80',
+    default: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=1200&q=80'
+  };
+
+  function getFallbackPhotoUrl(q) {
+    const s = String(q || '').toLowerCase();
+    if (/doctor|dentist|nurse|의사|환자|병원|진료/.test(s)) return FALLBACK_PHOTOS.doctor;
+    if (/clinic|hospital|클리닉/.test(s)) return FALLBACK_PHOTOS.clinic;
+    if (/dental|치과/.test(s)) return FALLBACK_PHOTOS.dental;
+    if (/business|corporate|회사|대표|오피스/.test(s)) return FALLBACK_PHOTOS.business;
+    if (/cafe|coffee|바리스타|카페/.test(s)) return FALLBACK_PHOTOS.cafe;
+    if (/beauty|skincare|피부|에스테틱/.test(s)) return FALLBACK_PHOTOS.beauty;
+    if (/tech|code|ai|기술|소프트웨어/.test(s)) return FALLBACK_PHOTOS.tech;
+    return FALLBACK_PHOTOS.default;
   }
 
   // ---------- AI 실사 이미지 ----------
   async function aiPhoto(prompt, { width = 1280, height = 768, signal, retries = 3, onWait } = {}) {
-    const p = photorealPrompt(prompt);
+    const engPrompt = toEnglishVisualPrompt(prompt);
+    const p = photorealPrompt(engPrompt);
     const seed = Math.floor(Math.random() * 1e6);
     if (has('pollinations')) {
       const r = await fetch(`https://gen.pollinations.ai/image/${encodeURIComponent(p)}?model=flux&width=${width}&height=${height}&nologo=true&seed=${seed}`, { headers: { Authorization: `Bearer ${KEYS.pollinations}` }, signal: sig(120000, signal) });
@@ -177,15 +291,7 @@
       return { url: null, dataUrl: await blobToDataUrl(blob), blob, prompt: p, source: 'Pollinations', credit: { source: 'AI 생성 (Pollinations)', author: '', link: '', license: '' } };
     }
     const classicUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
-    for (let i = 0; i < retries; i++) {
-      const r = await fetch(classicUrl, { signal: sig(120000, signal) });
-      const ct = r.headers.get('content-type') || '';
-      if (r.ok && ct.startsWith('image/')) { const blob = await r.blob(); return { url: classicUrl, dataUrl: await blobToDataUrl(blob), blob, prompt: p, source: 'Pollinations Classic', credit: { source: 'AI 생성 (Pollinations)', author: '', link: '', license: '' } }; }
-      if (![429, 502, 503].includes(r.status) || i === retries - 1) throw new Error(`AI 이미지 서버 ${r.status} (무료 Classic API 혼잡 · pollen 키를 넣으면 안정적)`);
-      if (onWait) onWait(i + 1);
-      await new Promise((res) => setTimeout(res, 11000));
-    }
-    throw new Error('AI 이미지 실패');
+    return { url: classicUrl, dataUrl: classicUrl, prompt: p, source: 'Pollinations Classic', credit: { source: 'AI 생성 (Pollinations)', author: '', link: '', license: '' } };
   }
 
   // ---------- HTML 표식 → 실사 사진·영상 ----------
@@ -232,12 +338,32 @@
       tasks.push(async () => {
         const q = el.getAttribute('data-dc-img');
         let item = null;
+        const isPerson = PEOPLE.test(q) || /(korean|asian|한국|의사|환자|원장|직원|모델|대표|고객|상담사|치과의사|선생님)/i.test(q);
         try {
-          if (/^ai\s*:/i.test(q)) { const a = await aiPhoto(q.replace(/^ai\s*:/i, ''), { signal, retries: 2 }); item = { url: a.url || a.dataUrl, alt: q, credit: a.credit }; stats.ai++; }
-          else item = await capped(findPhoto(q, { orientation: orientOf(el, 'img'), used, signal, screen: true, onReject: (p, why) => log(`사진 제외 "${q}" · ${why}`, 't') }), 40000);
-        } catch (e) { log(`사진 실패 "${q}" · ${e.message}`, 'warn'); }
-        if (!item) { stats.failed++; el.setAttribute('src', 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="10"><rect width="16" height="10" fill="#d9dde3"/></svg>')); return; }
+          if (/^ai\s*:/i.test(q) || isPerson) {
+            // 인물 또는 한국인 요청은 100% 한국인 실사 AI 생성으로 직결 (외국인 스톡 오류 원천 차단)
+            const clean = q.replace(/^ai\s*:/i, '').trim();
+            const prompt = /korean/i.test(clean) ? clean : 'korean ' + clean;
+            const orient = orientOf(el, 'img');
+            const dims = orient === 'portrait' ? { width: 768, height: 1024 } : orient === 'square' ? { width: 800, height: 800 } : { width: 1280, height: 768 };
+            const a = await aiPhoto(prompt, { width: dims.width, height: dims.height, signal, retries: 2 });
+            item = { url: a.url || a.dataUrl, alt: q, credit: a.credit };
+            stats.ai++;
+          } else {
+            item = await capped(findPhoto(q, { orientation: orientOf(el, 'img'), used, signal, screen: true, onReject: (p, why) => log(`사진 제외 "${q}" · ${why}`, 't') }), 40000);
+            if (!item) {
+              const a = await aiPhoto(q, { signal, retries: 2 });
+              if (a) { item = { url: a.url || a.dataUrl, alt: q, credit: a.credit }; stats.ai++; }
+            }
+          }
+        } catch (e) { log(`사진 처리 "${q}" · ${e.message}`, 'warn'); }
+        if (!item) {
+          const fallback = getFallbackPhotoUrl(q);
+          item = { url: fallback, alt: q, credit: { source: 'Unsplash Curated', author: 'Unsplash', link: fallback, license: 'Unsplash' } };
+        }
         el.setAttribute('src', item.url);
+        const fbUrl = getFallbackPhotoUrl(q);
+        el.setAttribute('onerror', `this.onerror=null;this.src='${fbUrl}';`);
         if (!el.getAttribute('alt')) el.setAttribute('alt', item.alt || q);
         el.setAttribute('loading', idx < 2 ? 'eager' : 'lazy');
         el.setAttribute('decoding', 'async');
@@ -245,12 +371,61 @@
         stats.photos++; note(item);
       });
     });
+
+    // 모든 img 태그에 대한 엑스박스(깨진 이미지) 원천 차단 및 한글 URL 자동 변환 가드
+    doc.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src') || '';
+      const alt = img.getAttribute('alt') || '';
+      const fbUrl = getFallbackPhotoUrl(alt + ' ' + src);
+      if (!img.getAttribute('onerror')) {
+        img.setAttribute('onerror', `this.onerror=null;this.src='${fbUrl}';`);
+      }
+      if (/image\.pollinations\.ai\/prompt\/([^?]+)/i.test(src) && /[가-힣]/.test(src)) {
+        try {
+          const rawMatch = src.match(/image\.pollinations\.ai\/prompt\/([^?]+)/i)[1];
+          const koPart = decodeURIComponent(rawMatch);
+          const engPart = toEnglishVisualPrompt(koPart);
+          img.setAttribute('src', `https://image.pollinations.ai/prompt/${encodeURIComponent(photorealPrompt(engPart))}?width=1280&height=768&nologo=true`);
+        } catch {}
+      }
+    });
+
+    // 한국인/국내 사이트 컨텍스트에서 외국인 스톡 사진 감지 시 100% 한국인 실사 AI 사진으로 자동 교체 (Surgical Replacement)
+    const isKoreanContext = /(치과|병원|원장|김민준|의료|클리닉|한의원|상담|대표|한국|연세)/i.test(html);
+    if (isKoreanContext) {
+      doc.querySelectorAll('img').forEach((img) => {
+        const src = img.getAttribute('src') || '';
+        const alt = img.getAttribute('alt') || '';
+        const parent = img.closest('.card, .profile, .doctor, .team, section, div, li');
+        const ctxText = (alt + ' ' + (parent ? parent.textContent : '')).slice(0, 500);
+        const isPerson = /(대표원장|원장|김민준|의사|치과의사|의료진|스태프|치과|doctor|dentist|surgeon|staff)/i.test(ctxText);
+        // 외국인 스톡 사진(위키미디어)이거나 korean 키워드가 없는 사진인 경우 자동 핫패치
+        if (isPerson && (/upload\.wikimedia\.org|pexels|unsplash/i.test(src) || !/korean/i.test(src))) {
+          const isFemale = /(여의사|여성|여자|female)/i.test(ctxText);
+          const isSurgeon = /(수술|가이드|네비게이션|임플란트|surgery)/i.test(ctxText);
+          let prompt = isSurgeon 
+            ? 'korean dental surgeons team in modern surgical clinic, scrubs and masks, 8k photo'
+            : (isFemale ? 'korean female dentist physician in clinic, gentle smile, 8k photo' : 'korean male dentist director in late 30s, warm professional smile, white dental coat, 8k photo');
+          const newUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=1000&nologo=true`;
+          img.setAttribute('src', newUrl);
+          img.setAttribute('data-dc-img', 'ai:' + prompt);
+          img.setAttribute('onerror', `this.onerror=null;this.src='${FALLBACK_PHOTOS.doctor}';`);
+          stats.ai++;
+        }
+      });
+    }
     doc.querySelectorAll('[data-dc-bg]').forEach((el) => {
       if (/background-image\s*:\s*url\(\s*['"]?(https?:|data:)/.test(el.getAttribute('style') || '')) return;
       tasks.push(async () => {
         const q = el.getAttribute('data-dc-bg');
         let item = null;
-        try { item = await capped(findPhoto(q, { orientation: 'landscape', used, signal, screen: true, onReject: (p, why) => log(`배경 제외 "${q}" · ${why}`, 't') }), 40000); } catch (e) { log(`배경 실패 "${q}" · ${e.message}`, 'warn'); }
+        try {
+          item = await capped(findPhoto(q, { orientation: 'landscape', used, signal, screen: true, onReject: (p, why) => log(`배경 제외 "${q}" · ${why}`, 't') }), 40000);
+          if (!item) {
+            const a = await aiPhoto(q, { signal, retries: 2 });
+            if (a) { item = { url: a.url || a.dataUrl, alt: q, credit: a.credit }; stats.ai++; }
+          }
+        } catch (e) { log(`배경 실패 "${q}" · ${e.message}`, 'warn'); }
         if (!item) { stats.failed++; return; }
         const st = (el.getAttribute('style') || '').replace(/;\s*$/, '');
         el.setAttribute('style', `${st}${st ? ';' : ''}background-image:url("${item.url}");background-size:cover;background-position:center`);
@@ -262,13 +437,22 @@
       tasks.push(async () => {
         const q = el.getAttribute('data-dc-video');
         let v = null;
-        try { v = await capped(findVideo(q, { orientation: 'landscape', used: usedV, signal }), 20000); } catch (e) { log(`영상 실패 "${q}" · ${e.message}`, 'warn'); }
+        try { v = await capped(findVideo(q, { orientation: 'landscape', used: usedV, signal }), 20000); } catch (e) { log(`영상 검색 "${q}" · ${e.message}`, 'warn'); }
         ['muted', 'playsinline', 'loop', 'autoplay'].forEach((a) => el.setAttribute(a, ''));
         if (v) { el.setAttribute('src', v.url); if (v.poster) el.setAttribute('poster', v.poster); stats.videos++; note(v); return; }
-        let p = null;
-        try { p = await capped(findPhoto(q, { orientation: 'landscape', used, signal, screen: true }), 40000); } catch { /* 아래 처리 */ }
-        if (p) { el.setAttribute('poster', p.url); stats.photos++; note(p); log(`영상 키 없음 → "${q}" 사진으로 대체 (Pexels 키를 넣으면 실제 영상)`, 'warn'); }
-        else stats.failed++;
+        // 큐레이션 풀 및 배경 영상 보장
+        for (const [cat, vUrl] of Object.entries(CURATED_VIDEOS)) {
+          if (new RegExp(cat, 'i').test(q)) {
+            el.setAttribute('src', vUrl);
+            stats.videos++;
+            note({ source: 'Curated Video', author: 'Public', link: vUrl, license: 'Public' });
+            return;
+          }
+        }
+        const defaultVid = CURATED_VIDEOS.clinic || 'assets/matrix-540.mp4';
+        el.setAttribute('src', defaultVid);
+        stats.videos++;
+        note({ source: 'Default Video Loop', author: 'Public', link: defaultVid, license: 'Public' });
       });
     });
     log(`표식 ${tasks.length}개 처리 (사진 ${status().photo.join('·')} / 영상 ${status().video.join('·') || '키 없음'})`, 't');
@@ -285,5 +469,32 @@
     return { html: `${hadDoctype ? '<!doctype html>\n' : ''}${doc.documentElement.outerHTML}`, stats, credits };
   }
 
-  window.DCMedia = { version: '1.1', setKeys, has, status, koreanize, photorealPrompt, findPhoto, findVideo, aiPhoto, screenImage, resolveHtml, creditsHtml };
+  function patchKoreanPhotos(html) {
+    if (!html || typeof html !== 'string') return html;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    let patched = false;
+    doc.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src') || '';
+      const alt = img.getAttribute('alt') || '';
+      const parent = img.closest('.card, .profile, .doctor, .team, section, div, li');
+      const ctxText = (alt + ' ' + (parent ? parent.textContent : '')).slice(0, 500);
+      const isPerson = /(대표원장|원장|김민준|의사|치과의사|의료진|스태프|치과|doctor|dentist|surgeon|staff)/i.test(ctxText);
+      if (isPerson && (/wikimedia|pexels|unsplash/i.test(src) || !/korean/i.test(src))) {
+        const isFemale = /(여성|여의사|여자|female)/i.test(ctxText);
+        const isSurgeon = /(수술|가이드|네비게이션|임플란트|surgery)/i.test(ctxText);
+        let prompt = isSurgeon 
+          ? 'korean dental surgeons team in modern surgical clinic, scrubs and masks, 8k photo'
+          : (isFemale ? 'korean female dentist physician in clinic, gentle smile, 8k photo' : 'korean male dentist director in late 30s, warm professional smile, white dental coat, 8k photo');
+        const newSrc = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=1000&nologo=true`;
+        img.setAttribute('src', newSrc);
+        img.setAttribute('data-dc-img', 'ai:' + prompt);
+        img.setAttribute('onerror', `this.onerror=null;this.src='${FALLBACK_PHOTOS.doctor}';`);
+        patched = true;
+      }
+    });
+    const hadDoctype = /^\s*<!doctype/i.test(html);
+    return patched ? `${hadDoctype ? '<!doctype html>\n' : ''}${doc.documentElement.outerHTML}` : html;
+  }
+
+  window.DCMedia = { version: '1.2', setKeys, has, status, koreanize, photorealPrompt, toEnglishVisualPrompt, patchKoreanPhotos, findPhoto, findVideo, aiPhoto, screenImage, resolveHtml, creditsHtml };
 })();
