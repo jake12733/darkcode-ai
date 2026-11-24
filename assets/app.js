@@ -581,7 +581,7 @@ const STAGES_FAST = ['CACHE', 'CONTEXT', 'ROUTE', 'GENERATE', 'VERIFY', 'GATE', 
 const STAGES_IMAGE = ['CACHE', 'PROMPT', 'IMAGE', 'RENDER'];
 const STAGES_LOCAL6 = ['CACHE', 'ROUTER', 'WORKER', 'CRITIC', 'REVISE', 'RENDER'];
 const STAGES_CORE = ['CACHE', 'CONTEXT', 'ROUTE', 'STRATEGIST', 'IMPLEMENTER', 'CRITIC', 'GATE', 'RENDER'];
-const STAGES_EXEC = ['CACHE', 'CONNECT', 'GENERATE', 'EXECUTE', 'OBSERVE', 'PATCH', 'GATE', 'RENDER'];
+const STAGES_EXEC = ['CACHE', 'CONNECT', 'TESTS', 'GENERATE', 'EXECUTE', 'OBSERVE', 'PATCH', 'GATE', 'RENDER'];
 
 async function buildContext(thread, run) {
   const msgs = thread.messages.filter((m) => !m.pending).map((m) => ({ role: m.role, content: m.role === 'assistant' ? (m.modelText || m.content) : m.content }));
@@ -1120,7 +1120,7 @@ ${String((res.snapshot && res.snapshot.text) || '').split('\n').map((l) => '  ' 
 }
 
 /* ---------- EXEC (AstraUnifiedEngine: 코드 생성 → 내 PC 실행기 실측 → 에러 로그로 수정 → 실행 결과로만 확정) ---------- */
-const EXEC_STAGE = { think: 'GENERATE', patch: 'PATCH', execute: 'EXECUTE', observe: 'OBSERVE', commit: 'GATE' };
+const EXEC_STAGE = { tests: 'TESTS', think: 'GENERATE', patch: 'PATCH', execute: 'EXECUTE', observe: 'OBSERVE', commit: 'GATE' };
 async function execWait(fn, ok, signal, limitMs) {
   const t0 = Date.now();
   for (;;) {
@@ -1160,16 +1160,18 @@ async function runExec(prompt, run, thread) {
       signal: run.signal, model: st.model,
       onEvent: (type, d) => {
         if (type === 'token') { run.rain(d.text); return; }
-        if (type === 'model') { run.log(`${d.attempt > 1 ? 'repair' : 'gen   '} ${d.model} ${d.attempt > 1 ? '에러 로그 반영해 수정 중' : '코드 생성 중'} (${d.attempt}차)`, 't'); return; }
-        if (type === 'model_done') { run.log(`done   ${d.model} ${d.chars}자 (${(d.ms / 1000).toFixed(1)}s)`, 'ok'); run.calls.push({ label: d.attempt > 1 ? 'repair' : 'generate', provider: 'Ollama', short: String(d.model).toUpperCase(), pid: 'exec', model: d.model }); return; }
+        if (type === 'model') { const what = d.role === 'tests' ? '요구사항으로 테스트 먼저 작성' : d.role === 'repair' ? '실패 내용 반영해 수정' : `후보 ${(d.candidate || 0) + 1} 생성`; run.log(`${d.role === 'tests' ? 'tests ' : d.role === 'repair' ? 'repair' : 'gen   '} ${d.model} ${what}${d.deep ? ' · 생각 모드' : ''}`, 't'); return; }
+        if (type === 'model_done') { run.log(`done   ${d.model} ${d.chars}자 (${(d.ms / 1000).toFixed(1)}s)`, 'ok'); run.calls.push({ label: d.role === 'tests' ? 'tests' : d.role === 'repair' ? 'repair' : `candidate#${(d.candidate || 0) + 1}`, provider: 'Ollama', short: String(d.model).toUpperCase(), pid: 'exec', model: d.model }); return; }
         if (type === 'model_fail') { run.log(`fail   모델 호출 실패 · ${d.error}`, 'err'); return; }
         if (type !== 'progress') return;
         if (EXEC_STAGE[d.stage]) run.stage(EXEC_STAGE[d.stage]);
         if (d.stage === 'build' && d.fallbackUsed) run.log(`fallback 모델 없이 0원 스텁으로 우회 · 실행돼도 확정 안 함 ${UNV}`, 'warn');
-        else if (d.stage === 'execute') { run.log(`exec   실행기로 전송 (${d.attempt}차)${ask ? ' · 실행기 창에서 코드 확인 후 y (60초 안에)' : ''}`, ask ? 'warn' : 't'); run.calls.push({ label: 'run#' + d.attempt, provider: 'runner', short: 'RUNNER', pid: 'exec', model: '' }); }
+        else if (d.stage === 'tests') run.log(`tests  ${d.message}`, 't');
+        else if (d.stage === 'execute') { run.log(`exec   실행기로 전송 (${d.attempt}차 · 후보 ${d.candidates || 1}개${d.candidates > 1 || /테스트/.test(d.message || '') ? ' · 묶음 실행' : ''})${ask ? ' · 실행기 창에서 코드 확인 후 y 한 번 (60초 안에)' : ''}`, ask ? 'warn' : 't'); run.calls.push({ label: 'run#' + d.attempt, provider: 'runner', short: 'RUNNER', pid: 'exec', model: '' }); }
         else if (d.stage === 'observe') {
-          const good = d.reason === 'ok' && d.outputPreview;
-          run.log(`verify ${d.attempt}차 실행 결과 ${d.reason}${d.exitCode !== null && d.exitCode !== undefined ? ` · exit ${d.exitCode}` : ''}`, good ? 'ok' : 'warn');
+          if (!d.reason) { run.log(`verify ${d.message || ''}`, 't'); return; }
+          const good = d.tests ? d.exitCode === 0 && d.tests.pass > 0 && d.tests.fail === 0 : d.reason === 'ok' && d.outputPreview;
+          run.log(`verify ${String(d.message || '').replace(/^\[\d+\/\d+\]\s*/, '')}`, good ? 'ok' : 'warn');
           if (d.outputPreview) run.log(`stdout ${d.outputPreview.split('\n')[0].slice(0, 160)}`, 't');
           if (d.errorPreview) run.log(`error  ${d.errorPreview.split('\n')[0].slice(0, 160)}`, 'err');
         } else if (d.stage === 'commit') run.log(`gate   ${d.status === 'VERIFIED' ? 'VERIFIED' : UNV} · ${d.stopReason || '-'}${d.committed ? ' · committed 반영' : ''}`, d.status === 'VERIFIED' ? 'ok' : 'warn');
