@@ -190,12 +190,18 @@
     medical: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
     hospital: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
     dental: 'https://upload.wikimedia.org/wikipedia/commons/6/62/Dermatologist_%2C_Eye_%2CCardiac%2CDental%2CENT_%2CGynecology%2CPsychiatry_clinic_at_Mediversal_Health_studio.webm',
+    business: 'https://upload.wikimedia.org/wikipedia/commons/3/3b/Digital_Earth_Globe_Video_Loop.webm',
+    office: 'https://upload.wikimedia.org/wikipedia/commons/3/3b/Digital_Earth_Globe_Video_Loop.webm',
+    agency: 'https://upload.wikimedia.org/wikipedia/commons/3/3b/Digital_Earth_Globe_Video_Loop.webm',
     tech: 'https://upload.wikimedia.org/wikipedia/commons/3/3b/Digital_Earth_Globe_Video_Loop.webm',
     code: 'assets/matrix-540.mp4',
     cyber: 'assets/matrix-540.mp4',
     matrix: 'assets/matrix-540.mp4',
     nature: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm',
-    ocean: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm'
+    ocean: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm',
+    beauty: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm',
+    cafe: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm',
+    food: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Ocean_waves_4K.webm'
   };
 
   async function findVideo(query, { orientation = 'landscape', used = new Set(), signal } = {}) {

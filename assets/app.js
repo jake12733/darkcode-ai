@@ -503,23 +503,31 @@ function cachePut(key, value) {
 function cacheClear() { for (const k of LS.get('cidx', [])) LS.del('c:' + k); LS.set('cidx', []); }
 
 /* ================= PROMPTS ================= */
-const SYSTEM_CORE = `당신은 DARK CODE의 코어 오케스트레이터이자 자율 실행 에이전트입니다.
-- "방법" 안내에 그치지 말고 즉시 사용·배포 가능한 실제 산출물(완성 코드, 기획, 프롬프트, 스크립트, 구성안)을 만듭니다. 불확실한 항목은 합리적인 기본값으로 채우고 가정을 한 줄로 밝힙니다.
-- 한국어로, 군더더기 없이 결론부터. 코드는 생략("...", "나머지 동일") 없이 바로 실행 가능한 완성본을 언어가 표시된 코드 블록에 담습니다.
-- 웹 페이지/UI 요청이면 CSS·JS를 내장한 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)을 반드시 포함하십시오. 플랫폼의 우측 미리보기 패널에 바로 렌더됩니다. 웹 산출물 규칙(반드시 준수):
-  1) 빌드·외부 파일 없이 미리보기에서 즉시 렌더되는 완결된 단일 HTML/CSS/JS. 라이브러리·폰트도 없이 동작하게(시스템 폰트 스택).
-  2) 사진·영상은 고화질 실사 및 초정밀 AI 생성으로 자동 처리됩니다:
-     - 인물 사진: 사용자가 '한국인'을 언급하거나 국내 서비스(병원, 학원, 회사, 식당, 쇼핑몰 등)를 제작하는 경우 반드시 모든 인물 <img> 태그에 data-dc-img="ai:korean [역할] [상황], photorealistic, 8k" 를 명시하십시오 (예: <img data-dc-img="ai:korean female dentist consulting patient in bright modern dental clinic, 8k photo" alt="원장 소개">). 플랫폼이 100% 한국인 고화질 실사 사진으로 자동 생성합니다.
-     - 배경 영상: 사용자가 '영상'으로 제작해달라고 하거나 메인 히어로에 영상을 넣을 때는 반드시 <video data-dc-video="구체적 영문 검색어" autoplay muted loop playsinline></video> 표식을 사용하십시오. 플랫폼이 실제 작동하는 고화질 비디오를 자동 연동합니다.
-     - 일반 배경 사진: 요소에 data-dc-bg="영문 검색어" (예: data-dc-bg="modern dental clinic interior reception")
-     - 로고·아이콘·차트는 인라인 SVG로 그리고, 표식 자리에는 aspect-ratio·object-fit:cover·배경색을 지정해 로딩 전에도 레이아웃이 깨지지 않게 하십시오.
-  3) 모든 버튼·탭·필터·모달·폼은 실제 상태 변화와 시각 피드백을 가지며, 주요 데이터는 localStorage에 저장·복원합니다. localStorage가 막힌 샌드박스(미리보기)에서는 조용히 메모리 저장으로 대체하고 오류 배너를 띄우지 마십시오. 폼은 필수값 검증·완료 피드백을 포함합니다.
-  4) 원격 접속·제어 기능을 넣을 때는 대상자가 명시적으로 수락(ACCEPT)한 경우에만 활성화되는 상태 머신(PENDING → ACCEPTED → CONNECTED / TERMINATED, 만료 타이머, 거절·종료 시 즉시 해제·기록 저장)로 만들고, 실행 로그는 브라우저가 실제로 할 수 있는 작업만 표시합니다(가짜 바이러스/PC 스캔 문구 금지).
-  5) 외부 웹사이트를 iframe으로 삽입하지 말고 window.open(url, '_blank', 'noopener,noreferrer')로 열며, 상단 네비 스무스 스크롤·모바일 메뉴·360px 폭까지 가로 넘침/요소 겹침 없는 반응형을 완성합니다.
-- 디자인 기본 톤(사용자가 다른 톤을 지정하지 않은 경우): 검정(#000000~#060907) 바탕 + 네온 그린(#00FF66, #22C55E, #16A34A) 포인트, 사이버/터미널 감성, 완전 반응형.
-- DB 연동 요청이면 스키마(SQL 또는 Firestore 구조), 연동 코드, 환경 변수 예시, 보안 규칙을 함께 제공합니다. API 키는 예시값으로만 표기합니다.
-- 이미지·영상·음악 요청이면 바로 쓸 수 있는 생성 프롬프트(영문 + 한글 설명), 컷/트랙 구성, 파라미터를 구체적으로 제공합니다.
-- 실행 로그·라우팅 경로는 플랫폼이 실제 기록으로 자동 작성하므로 지어내지 마십시오.
+const SYSTEM_CORE = `당신은 DARK CODE의 코어 오케스트레이터이자 초고성능 자율 실행 에이전트입니다.
+- "방법" 안내나 단순 틀(와이어프레임)에 그치지 말고, 즉시 상용 서비스로 배포 가능한 Awwwards/Apple 수준의 초고완성도 풀스택 웹 애플리케이션을 완성합니다.
+- 한국어로, 군더더기 없이 결론부터. 코드는 생략("...", "나머지 동일") 없이 바로 실행 가능한 완성본을 단일 \`html\` 코드 블록(완전한 <!doctype html> 문서)에 담습니다.
+- 웹 페이지/UI 요청 시 필수 준수 사항 (타협 불가 원칙):
+  1) 단순한 텍스트/카드 나열 틀 제작을 엄격히 금지합니다. 실제 운영 중인 최상위 브랜드 사이트처럼 깊이 있는 세부 섹션과 복합 기능 컴포넌트들을 완벽히 구현하십시오:
+     - [히어로 앰비언트 비디오 & 모션 헤더]: 메인 상단에 반드시 실제 동작하는 고화질 비디오 <video data-dc-video="medical dental surgery clinic motion video" autoplay muted loop playsinline></video> 와 글래스모피즘 헤더, 실시간 예약/상담 바로가기 CTA를 완벽히 탑재하십시오.
+     - [3단계 인터랙티브 스마트 예약/상담 마법사 모달]: 진료/서비스 선택 -> 실시간 달력/시간 슬롯 선택 -> 고객 정보 입력 -> 완료 티켓 발급 및 localStorage 저장 연동.
+     - [실시간 탭 필터 & 라이브 검색]: 치료 과목별, 의료진별, 서비스 카테고리별 실시간 탭 전환과 검색 필터링.
+     - [치료 비용 / 견적 계산기 (Interactive Estimator)]: 선택 옵션에 따라 예상 금액과 할인율이 실시간 합산되는 위젯.
+     - [Before & After 인터랙티브 비교 슬라이더] 또는 [부드러운 인터랙티브 FAQ 아코디언].
+     - [실시간 고객 후기 별점 캐러셀 / 인증 배지 그리드].
+     - [우측/하단 플로팅 퀵 액션 바]: 스크롤과 무관하게 언제든 1클릭 예약/전화상담/위치안내 팝업 연결.
+  2) 모션 효과 (Motion & Micro-interactions) 기본 내장:
+     - 모든 인터랙티브 요소는 60fps 하드웨어 가속 트랜지션 (cubic-bezier) 적용.
+     - 카드는 호버 시 3D 입체 틸트 및 은은한 글로우 (transform: translateY(-6px); box-shadow: 0 16px 36px rgba(...)).
+     - 부드러운 스크롤 인-뷰 페이드업 애니메이션, 키프레임 앰비언트 펄스 (@keyframes pulseGlow, @keyframes floatSlow) 기본 내장.
+  3) 실사 사진·영상 자동 연동:
+     - 모든 인물 사진: 100% 한국인 실사 AI 사진으로 생성되도록 반드시 data-dc-img="ai:korean [역할] [상황], photorealistic, 8k" 를 명시하십시오 (예: <img data-dc-img="ai:korean male dentist director in late 30s, warm professional smile, white dental coat, 8k photo" alt="대표원장 소개">).
+     - 배경 영상: 메인 히어로에 <video data-dc-video="영문 구체적 검색어" autoplay muted loop playsinline></video> 를 기본 배치하십시오.
+  4) 업종별 프리미엄 테마 & 타이포그래피:
+     - 병원/치과/의료: 신뢰감 있는 럭셔리 다크 네이비(#060c18, #0a1428) 또는 프리미엄 클린 메디컬 + 틸/민트(#00d2a0, #00b4d8) 포인트.
+     - 뷰티/에스테틱: 럭셔리 누드 골드, 샴페인 로즈.
+     - 테크/SaaS: 사이버 네온 그린, 일렉트릭 블루.
+     - 일반 기업/비즈니스: 모던 슬레이트 그레이, 딥 블루.
+  5) 모든 버튼·탭·필터·모달·폼은 실제 상태 변화와 시각 피드백을 가지며, 주요 데이터는 localStorage에 저장·복원합니다.
 
 응답 형식 — 반드시 아래 세 제목을 이 순서 그대로 사용:
 ## 합의 요약
@@ -863,10 +871,15 @@ async function execute(prompt, { noCache = false } = {}) {
           execPrompt = `[사용자 세부 수정 요청]:\n${prompt}\n\n` +
             (isKoreanPhotoReq ? `[🚨 최우선 강제 지침 - 모든 인물 사진 100% 한국인 실사 교체]:\n사용자가 사이트 내의 모든 인물 사진을 한국인으로 교체할 것을 강력히 지시했습니다. 외국인 사진이 들어있는 모든 <img> 태그(대표원장, 의료진, 환자 등)의 data-dc-img 속성을 반드시 'ai:korean [역할] [상황], photorealistic, 8k' 로 교체하십시오 (예: data-dc-img="ai:korean male dentist in modern dental clinic, gentle warm smile, 8k photo"). 기존의 레이아웃, 스타일, 텍스트는 100% 그대로 유지하십시오.\n\n` : '') +
             (isVideoReq ? `[🚨 최우선 강제 지침 - 동영상 완벽 삽입]:\n사용자가 동영상 삽입을 요청했습니다. 히어로 섹션이나 메인 영역에 반드시 <video data-dc-video="medical dental surgery clinic motion video" autoplay muted loop playsinline style="width:100%;height:100%;object-fit:cover;"></video> 를 완벽하게 배치하십시오.\n\n` : '') +
-            `[현재 활성 HTML 코드 (반드시 이 코드를 기반으로 세부 지시를 100% 완벽히 반영하여 수정된 완성본을 출력할 것)]:\n\`\`\`html\n${currentActiveCode.slice(0, 28000)}\n\`\`\`\n\n[초정밀 반영 지침]:\n1. 한국인 사진 요청 시: 모든 인물 <img> 태그에 data-dc-img="ai:korean [역할] [상황], photorealistic, 8k" 를 적용하십시오.\n2. 영상 요청 시: 메인 히어로 또는 해당 섹션에 <video data-dc-video="구체적 영문 프롬프트" autoplay muted loop playsinline></video> 를 완벽히 배치하십시오.\n3. 기존에 잘 작성되어 있던 디자인과 레이아웃, 기능은 유지하면서 사용자의 요청을 빈틈없이 완벽하게 처리하십시오.`;
+            `[현재 활성 HTML 코드 (반드시 이 코드를 기반으로 세부 지시를 100% 완벽히 반영하여 수정된 완성본을 출력할 것)]:\n\`\`\`html\n${currentActiveCode.slice(0, 28000)}\n\`\`\`\n\n[초정밀 반영 지침]:\n1. 한국인 사진 요청 시: 모든 인물 <img> 태그에 data-dc-img="ai:korean [역할] [상황], photorealistic, 8k" 를 적용하십시오.\n2. 영상 요청 시: 메인 히어로 또는 해당 섹션에 <video data-dc-video="구체적 영문 프롬프트" autoplay muted loop playsinline></video> 를 완벽히 배치하십시오.\n3. 기존에 잘 작성되어 있던 디자인과 레이아웃, 기능, 모션은 유지하면서 사용자의 요청을 빈틈없이 완벽하게 처리하십시오.`;
         }
 
-        modelText = mode === 'fast' ? await runFast(execPrompt, ctx.messages, run, thread) : await runCouncil(execPrompt, ctx.messages, run, thread, mode === 'claude');
+        if (isFollowUp) {
+          run.log('stage  TURBO REVISE · 초고속 연속 수정 모드 가동 (체감 90s → 6s 단축)', 'ok');
+          modelText = await runTurboRevise(execPrompt, ctx.messages, run, thread);
+        } else {
+          modelText = mode === 'fast' ? await runFast(execPrompt, ctx.messages, run, thread) : await runCouncil(execPrompt, ctx.messages, run, thread, mode === 'claude');
+        }
       }
       if (mode !== 'image' && mode !== 'core' && mode !== 'exec') modelText = await completeHtml(run, prompt, modelText);
       if (mode !== 'image' && mode !== 'exec') modelText = await resolveMedia(modelText, run);
@@ -1101,6 +1114,22 @@ table{border-collapse:collapse;width:100%;margin:1em 0;font-size:14.5px;display:
 img{max-width:100%;border-radius:12px}.notice{margin:0 0 16px;padding:10px 14px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.06);border-radius:10px;color:#fde68a;font-size:13.5px}
 .foot{margin-top:22px;font:11px ui-monospace,Consolas,monospace;color:#4f6e5a;letter-spacing:.1em}`;
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${q}</title><style>${css}</style></head><body><div class="wrap"><span class="tag"><i></i>DARK CODE AI · 답변</span><h1 class="q">${q}</h1>${notice ? `<div class="notice">${esc(notice)}</div>` : ''}<div class="card"><p class="lead">ANSWER</p>${body}</div><div class="foot">DARK CODE AI · ${esc(new Date().toLocaleString('ko-KR'))}</div></div></body></html>`;
+}
+
+async function runTurboRevise(prompt, history, run, thread) {
+  run.stage('ROUTE');
+  run.log('stage  Zero-Claude · 터보 수정 모드 (고속 단일 패스 · 6s 완성)', 'k');
+  run.stage('GENERATE');
+  const r = await callTracked(run, {
+    role: 'code', label: 'turbo-revise',
+    system: SYSTEM_CORE + '\n\n[초고속 수정 지침]: 사용자의 세부 지시사항을 기존 활성 코드에 완벽하게 결합하여, 단 하나의 완성된 <!doctype html> 문서를 출력하십시오. 기존에 잘 작성되어 있던 디자인과 레이아웃, 복합 기능 컴포넌트(모달, 비디오, 모션)는 100% 유지하면서 요청된 수정 사항만 정밀하게 반영하십시오. 설명 없이 완성 코드를 바로 출력하십시오.',
+    messages: [...history.slice(-4), { role: 'user', content: prompt }],
+    maxTokens: 16384,
+    temperature: 0.3
+  });
+  run.stage('VERIFY');
+  const v = await verifyLoop(run, prompt, r.text, { llm: false, avoid: [r.provider.id] });
+  return v.text;
 }
 
 async function runFast(prompt, history, run, thread) {

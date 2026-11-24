@@ -156,10 +156,64 @@
       }
     } catch(e) {}
   }
+
+  // 4. DarkMotion & Rich Interactive Auto-Enhancer: 스크롤 인뷰 모션, 3D 카드 호버, 비디오 자동 재생 보장
+  function enhanceSiteInteractivityAndMotion() {
+    try {
+      // (1) 스크롤 진입 부드러운 페이드업 애니메이션 자동 주입 (IntersectionObserver)
+      const targets = document.querySelectorAll('section, .card, .profile, .doctor, .service-card, .item, .step, h2, .faq-item');
+      if (targets.length && window.IntersectionObserver) {
+        const obs = new IntersectionObserver(function(entries) {
+          entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+              entry.target.style.opacity = '1';
+              entry.target.style.transform = 'translateY(0)';
+              obs.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.1 });
+
+        targets.forEach(function(el, idx) {
+          if (!el.getAttribute('data-dc-motion-init')) {
+            el.setAttribute('data-dc-motion-init', '1');
+            el.style.transition = 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
+            el.style.transitionDelay = (idx % 4 * 0.08) + 's';
+            el.style.opacity = '0.01';
+            el.style.transform = 'translateY(24px)';
+            obs.observe(el);
+          }
+        });
+      }
+
+      // (2) 모든 비디오 요소 무음 자동 재생 보장
+      document.querySelectorAll('video').forEach(function(v) {
+        v.muted = true;
+        v.setAttribute('playsinline', '');
+        v.setAttribute('autoplay', '');
+        v.setAttribute('loop', '');
+        const p = v.play();
+        if (p && p.catch) p.catch(function() {});
+      });
+
+      // (3) 카드 및 인터랙티브 요소 호버 3D 입체감
+      document.querySelectorAll('.card, .doctor-card, .btn, button, .service-item').forEach(function(el) {
+        if (!el.getAttribute('data-dc-hover-init')) {
+          el.setAttribute('data-dc-hover-init', '1');
+          el.style.transition = (el.style.transition ? el.style.transition + ', ' : '') + 'box-shadow 0.25s ease, transform 0.25s ease';
+        }
+      });
+    } catch(e) {}
+  }
+
+  function runVisualAndMotionAudit() {
+    auditKoreanVisuals();
+    enhanceSiteInteractivityAndMotion();
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', auditKoreanVisuals);
+    document.addEventListener('DOMContentLoaded', runVisualAndMotionAudit);
   } else {
-    setTimeout(auditKoreanVisuals, 300);
+    setTimeout(runVisualAndMotionAudit, 300);
   }
 
   // 3. 자율 탐색 및 인터랙션 시뮬레이션
