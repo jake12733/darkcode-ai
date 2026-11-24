@@ -67,7 +67,7 @@ function scriptPrompt(req, seconds, format) {
 - 의료·건강·뷰티 관련이면 "최고, 1위, 100%, 완치, 보장, 부작용 없음" 같은 과장 표현 금지.
 JSON 형식: {"title":"...","cta":"...","scenes":[{"narration":"...","subtitle":"...","seconds":5,"visual":{"kind":"video","query":"..."}}]}`;
 }
-const GEM_MODELS = ['gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-3.5-flash-lite'];
+const GEM_MODELS = ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
 async function gemJSON(key, prompt) {
   let lastErr = null;
   for (const m of GEM_MODELS) {
@@ -142,9 +142,27 @@ async function decodeAudio(bytes) {
   return ac.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 }
 
+/* ---------- 사진 검수 (Gemini 비전) : 공개 아카이브 사진에 다른 업체 간판·전화번호·옛날 사진이 섞이지 않게 ---------- */
+const ARCHIVE_SRC = /Wikimedia|Openverse/;
+async function screenImage(key, bmp, query) {
+  const c = document.createElement('canvas'); const k = 512 / Math.max(bmp.width, bmp.height);
+  c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  const data = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+  const ask = `이 사진을 "${query}" 장면의 광고 영상 배경으로 써도 되는지 판단해. 안 되는 경우: 다른 업체 이름·로고·간판·전화번호·사람 이름 같은 글자가 눈에 띄게 보임 / 주제와 무관 / 흑백·옛날 사진·저화질 / 군대·사고·시위 같은 부적절한 장면. JSON 으로만: {"ok":true 또는 false,"reason":"짧게"}`;
+  for (const m of ['gemini-3.5-flash-lite', 'gemini-4-hydrogen']) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data } }, { text: ask }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 160 } }), signal: AbortSignal.timeout(30000) }).catch(() => null);
+    if (!r || !r.ok) continue;
+    const j = await r.json().catch(() => ({}));
+    const txt = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
+    try { const o = JSON.parse(txt.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '')); return { ok: Boolean(o.ok), reason: String(o.reason || '').slice(0, 80) }; } catch { /* 다음 모델 */ }
+  }
+  return { ok: true, reason: '검수 불가 (통과 처리)' };
+}
+
 /* ---------- 소재 ---------- */
 async function fetchBlob(url, ms) { const r = await fetch(url, { mode: 'cors', signal: AbortSignal.timeout(ms) }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); }
-async function loadVisual(scene, W, H, used, usedV, MB) {
+async function loadVisual(scene, W, H, used, usedV, MB, gemKey) {
   const M = window.DCMedia;
   const orient = W > H ? 'landscape' : W < H ? 'portrait' : 'square';
   if (scene.kind === 'video' && M.status().video.length) {
@@ -158,10 +176,16 @@ async function loadVisual(scene, W, H, used, usedV, MB) {
       } catch (e) { log(`  영상 불러오기 실패 (${e.message}) → 사진으로`); }
     }
   }
-  const p = await capped(M.findPhoto(scene.query, { orientation: orient, used }), 25000);
-  if (p) {
-    try { const bmp = await createImageBitmap(await fetchBlob(p.url, 45000)); return { type: 'photo', bmp, credit: p.credit }; }
-    catch (e) { log(`  사진 불러오기 실패 (${e.message})`); }
+  for (let tries = 0; tries < 4; tries++) {
+    const p = await capped(M.findPhoto(scene.query, { orientation: orient, used }), 25000);
+    if (!p) break;
+    let bmp = null;
+    try { bmp = await createImageBitmap(await fetchBlob(p.url, 45000)); } catch (e) { log(`  사진 불러오기 실패 (${e.message})`); continue; }
+    if (gemKey && ARCHIVE_SRC.test(p.credit.source)) {
+      const v = await screenImage(gemKey, bmp, scene.query);
+      if (!v.ok) { log(`  사진 제외 (${v.reason}) → 다음 후보`); continue; }
+    }
+    return { type: 'photo', bmp, credit: p.credit };
   }
   try { const a = await M.aiPhoto(scene.query, { width: W, height: H, retries: 2 }); return { type: 'photo', bmp: await createImageBitmap(a.blob), credit: a.credit }; }
   catch (e) { log(`  AI 이미지도 실패 (${e.message})`); }
@@ -269,10 +293,10 @@ async function render(plan, W, H, MB, onProgress) {
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
   const output = new MB.Output({ format: new MB.Mp4OutputFormat(), target: new MB.BufferTarget() });
-  const vsrc = new MB.CanvasSource(canvas, { codec: 'avc', quality: new MB.Quality('high') });
+  const vsrc = new MB.CanvasSource(canvas, { codec: 'avc', quality: new MB.Quality({ bitrate: Math.max(W, H) >= 1280 ? 5e6 : 4e6 }) });
   output.addVideoTrack(vsrc, { frameRate: FPS });
   let asrc = null;
-  if (plan.audio) { asrc = new MB.AudioBufferSource({ codec: 'aac', quality: new MB.Quality('high') }); output.addAudioTrack(asrc); }
+  if (plan.audio) { asrc = new MB.AudioBufferSource({ codec: 'aac', quality: new MB.Quality({ bitrate: 160e3 }) }); output.addAudioTrack(asrc); }
   await output.start();
   const totalFrames = Math.round(plan.total * FPS);
   let frame = 0;
@@ -356,7 +380,7 @@ async function makePromo() {
     const used = new Set(); const usedV = new Set(); const credits = [];
     for (let i = 0; i < plan.scenes.length; i++) {
       const s = plan.scenes[i];
-      s.visual = await loadVisual(s, W, H, used, usedV, MB);
+      s.visual = await loadVisual(s, W, H, used, usedV, MB, keys.gemini);
       if (s.visual.credit) credits.push(s.visual.credit);
       log(`장면 ${i + 1}: ${s.visual.type === 'video' ? '실사 영상' : s.visual.type === 'photo' ? '실사 사진' : '소재 없음 (그라데이션)'}${s.visual.credit ? ' · ' + s.visual.credit.source : ''}`);
       if (s.visual.type === 'video') { try { const w = await s.visual.sink.getCanvas(Math.min(1, s.visual.dur / 2)); if (w && w.canvas) { const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d').drawImage(w.canvas, 0, 0, W, H); s.visual.still = c; } } catch { /* 미리보기만 */ } }
@@ -367,8 +391,8 @@ async function makePromo() {
     if (voice && (keys.gemini || keys.azure)) {
       status('3/5 나레이션 녹음 중...');
       const style = ($('#pStyle') && $('#pStyle').value.trim()) || '따뜻하고 신뢰감 있는 한국어 광고 나레이션, 또렷한 발음, 차분한 속도';
-      for (let i = 0; i < plan.scenes.length; i++) {
-        const s = plan.scenes[i];
+      let next = 0;
+      const one = async () => { while (next < plan.scenes.length) { const i = next++; const s = plan.scenes[i];
         try {
           const r = keys.gemini ? await ttsGemini(keys.gemini, s.narration, voice, style) : await ttsAzure(keys.azure, keys.azureRegion, s.narration);
           s.voice = await decodeAudio(r.bytes); plan.voiceBy = r.model;
@@ -377,7 +401,8 @@ async function makePromo() {
           if (keys.gemini && keys.azure) { try { const r = await ttsAzure(keys.azure, keys.azureRegion, s.narration); s.voice = await decodeAudio(r.bytes); plan.voiceBy = r.model; continue; } catch { /* 아래 */ } }
           log(`  나레이션 ${i + 1} 실패 (${e.message}) → 이 장면은 자막만`);
         }
-      }
+      } };
+      await Promise.all([one(), one()]);
     } else log(voice ? '나레이션 키 없음 (Gemini 키 필요) → 자막만' : '나레이션 없음 (자막만)');
 
     let t = 0;
