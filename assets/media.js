@@ -15,6 +15,7 @@
   const PEOPLE = /\b(people|person|man|men|woman|women|girl|boy|doctor|dentist|nurse|patient|staff|team|family|couple|child|children|kid|student|teacher|customer|client|worker|surgeon|therapist|physician|receptionist|chef|barista|trainer|portrait|smiling|face|businessman|businesswoman|employee|senior|elderly|mother|father|baby)\b/i;
   const NATION = /\b(korean|asian|japanese|chinese|american|european|african|indian|caucasian|black|white|latino|hispanic|western|arab)\b/i;
   const STYLE = /(anime|illustration|cartoon|watercolor|vector|flat design|3d render|pixel art|sketch|line art|clay|일러스트|애니|만화|그림체|수채화|픽셀|캐릭터)/i;
+  const ARCHIVE = /(\bNARA\b|\bDPLA\b|\bHABS\b|FindID|Portable Antiquities|Library of Congress|\bLOC\b|archive|collection|exhibit|historic|history|vintage|\bold\b|retiring|state hospital)/i;
   const ART = /(painting|google art project|museum|drawing|engraving|illustration|lithograph|etching|\bmap\b|logo|diagram|poster|stamp|coin|banknote|manuscript|sketch|watercolou?r|fresco|statue|sculpture|\b1[5-9]\d\d\b)/i;
 
   const setKeys = (k) => { Object.keys(k || {}).forEach((n) => { if (n in KEYS && typeof k[n] === 'string') KEYS[n] = k[n].trim(); }); };
@@ -57,7 +58,7 @@
   const byOrientation = (list, o) => list.filter((x) => fits(x, o)).concat(list.filter((x) => !fits(x, o)));
   const strip = (h) => String(h || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   async function wikimediaPhotos(q, o, signal) {
-    const url = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(q + ' filetype:bitmap')}&gsrnamespace=6&gsrlimit=30&prop=imageinfo&iiprop=url|size|extmetadata&iiurlwidth=1600&iiextmetadatafilter=LicenseShortName|Artist`;
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(q + ' filetype:bitmap')}&gsrnamespace=6&gsrlimit=30&prop=imageinfo&iiprop=url|size|mime|extmetadata&iiurlwidth=1600&iiextmetadatafilter=LicenseShortName|Artist|DateTimeOriginal`;
     const j = await getJSON(url, { signal }, 15000);
     const pages = Object.values((j.query && j.query.pages) || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
     const list = pages.map((p) => {
@@ -66,7 +67,9 @@
       const em = ii.extmetadata || {};
       const lic = strip(em.LicenseShortName && em.LicenseShortName.value);
       const title = String(p.title || '').replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '');
-      if ((ii.width || 0) < 800 || !/(cc|public domain|pd)/i.test(lic) || /\b(nc|nd)\b/i.test(lic) || !okText(title) || ART.test(title)) return null;
+      const upper = (title.match(/[A-Z]/g) || []).length / Math.max(1, (title.match(/[A-Za-z]/g) || []).length);
+      const year = Number((strip(em.DateTimeOriginal && em.DateTimeOriginal.value).match(/(19|20)\d\d/) || [])[0] || 0);
+      if ((ii.width || 0) < 800 || /tiff/i.test(ii.mime || '') || !/(cc|public domain|pd)/i.test(lic) || /\b(nc|nd)\b/i.test(lic) || !okText(title) || ART.test(title) || ARCHIVE.test(title) || upper > 0.6 || (year && year < 2005)) return null;
       return { id: 'wm:' + p.pageid, url: ii.thumburl || ii.url, small: ii.thumburl || ii.url, w: ii.width, h: ii.height, alt: title, credit: { source: 'Wikimedia Commons', author: strip(em.Artist && em.Artist.value).slice(0, 60), link: ii.descriptionurl || ii.url, license: lic, title } };
     }).filter(Boolean);
     return byOrientation(list, o);
