@@ -2,7 +2,7 @@
 // AstraUnifiedEngine v2 (같은 폴더 astra-unified-engine.js) + 로컬 실행기(기본 127.0.0.1:8797) + Ollama(로컬 6-에이전트와 같은 주소)
 // VERIFIED 판정은 엔진만 한다. 이 파일은 연결 확인, 모델 호출, 중단 처리, 결과 문서화만 담당한다.
 // 원장(runs/committed)은 실행 콘솔(astra.html)과 같은 저장소 키를 써서 양쪽에서 같이 보인다.
-import { AstraUnifiedEngine } from './astra-unified-engine.js?v=20261123c';
+import { AstraUnifiedEngine } from './astra-unified-engine.js?v=20261124e3';
 
 const LS_RUNNER = 'dc-astra-runner';   // 실행기 주소 바꿀 때만 (기본 http://127.0.0.1:8797)
 const LS_MODEL = 'dc-astra-model';     // 모델 고정할 때만 (기본 자동 선택)
@@ -24,6 +24,7 @@ const STOP_INFO = {
   SPAWN_ERROR: '실행기가 프로세스를 띄우지 못함 (Node 설치 확인)',
   ABORTED: '사용자가 중단함',
   NO_NEW_PATCH: '모델이 같은 코드를 다시 냄 → 요청을 더 구체적으로',
+  TESTS_FAILED: '요구사항 테스트를 끝까지 통과하지 못함 → 요청을 더 구체적으로 또는 다른 모델',
   REPEATED_ERROR: '같은 에러가 반복됨 → 요청 수정 또는 다른 모델',
   MODEL_FAILED_ON_RETRY: '재시도 중 모델 호출 실패',
   FALLBACK_ONLY: '모델 호출 실패 → 0원 스텁만 실행됨 (실행기 경로 확인용, 확정 불가)',
@@ -79,9 +80,9 @@ function anySignal(list) {
 }
 const stripThink = (t) => String(t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*?<\/think>/i, '').trim();
 
-async function callOllama(prompt, model, { signal, onToken } = {}) {
+async function callOllama(prompt, model, { signal, onToken, think = false, temperature } = {}) {
   const url = ollamaHost() + '/api/chat';
-  const body = { model, messages: [{ role: 'user', content: prompt }], stream: true, think: false };
+  const body = { model, messages: [{ role: 'user', content: prompt }], stream: true, think: Boolean(think), ...(typeof temperature === 'number' ? { options: { temperature } } : {}) };
   const sig = anySignal([signal, AbortSignal.timeout(MODEL_TIMEOUT_MS)]);
   const post = () => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: sig });
   let res = await post();
@@ -116,19 +117,20 @@ async function callOllama(prompt, model, { signal, onToken } = {}) {
 }
 
 // ---------- 엔진 (중단 신호 지원만 덧붙임 · 판정 로직은 원본 그대로) ----------
+const ABORTED = () => ({ executed: false, exitCode: null, output: '', stderr: 'ABORTED: 사용자 중단', reason: 'aborted', runnerLevel: true, httpStatus: 0 });
 class ExecEngine extends AstraUnifiedEngine {
-  async runOnLocal(targetModule, code, command, opts) {
+  _race(call, wrap) {
     const sig = this.abortSignal;
-    const aborted = { executed: false, exitCode: null, output: '', stderr: 'ABORTED: 사용자 중단', reason: 'aborted', runnerLevel: true, httpStatus: 0 };
-    if (sig && sig.aborted) return aborted;
-    const call = super.runOnLocal(targetModule, code, command, opts);
+    if (sig && sig.aborted) return Promise.resolve(wrap(ABORTED()));
     if (!sig) return call;
-    return Promise.race([call, new Promise((resolve) => sig.addEventListener('abort', () => resolve(aborted), { once: true }))]);
+    return Promise.race([call, new Promise((resolve) => sig.addEventListener('abort', () => resolve(wrap(ABORTED())), { once: true }))]);
   }
+  runOnLocal(targetModule, code, command, opts) { return this._race(super.runOnLocal(targetModule, code, command, opts), (x) => x); }
+  runJobs(targetModule, jobs, opts) { return this._race(super.runJobs(targetModule, jobs, opts), (x) => ({ runnerFailure: x })); }
 }
 let engine = null;
 function getEngine() {
-  if (!engine) engine = new ExecEngine({ runnerUrl: runnerBase() + '/run' });
+  if (!engine) engine = new ExecEngine({ runnerUrl: runnerBase() + '/run', candidates: 2, testsFirst: true });
   engine.runnerUrl = runnerBase() + '/run';
   return engine;
 }
@@ -149,11 +151,12 @@ async function run(prompt, { signal, model, onEvent = () => {} } = {}) {
       callModelFn: async (p, ctx) => {
         if (signal && signal.aborted) throw new Error('ABORTED');
         if (!model) throw new Error('MODEL_UNAVAILABLE: Ollama 에 쓸 수 있는 모델 없음');
-        onEvent('model', { attempt: ctx.attempt, model });
+        onEvent('model', { attempt: ctx.attempt, model, role: ctx.role, candidate: ctx.candidate, deep: Boolean(ctx.deep) });
         const t0 = performance.now();
         try {
-          const text = await callOllama(p, model, { signal, onToken: (t) => onEvent('token', { text: t }) });
-          onEvent('model_done', { attempt: ctx.attempt, model, chars: text.length, ms: performance.now() - t0 });
+          // 재시도·추가 후보는 생각 모드(think) 켜기 · 테스트/첫 후보는 빠르게
+          const text = await callOllama(p, model, { signal, think: Boolean(ctx.deep), temperature: ctx.temperature, onToken: (t) => onEvent('token', { text: t }) });
+          onEvent('model_done', { attempt: ctx.attempt, model, role: ctx.role, candidate: ctx.candidate, chars: text.length, ms: performance.now() - t0 });
           return text;
         } catch (e) {
           const msg = e && e.name === 'TimeoutError' ? `MODEL_TIMEOUT (${MODEL_TIMEOUT_MS / 1000}초)` : (signal && signal.aborted) ? 'ABORTED' : (e && e.message) || String(e);
@@ -170,6 +173,7 @@ async function run(prompt, { signal, model, onEvent = () => {} } = {}) {
 
 // ---------- 결과 문서 (DARK CODE 답변 형식: 합의 요약 / 산출물 / 스냅샷) ----------
 const isVerified = (r) => Boolean(r && r.verified === true && r.status === 'VERIFIED' && r.exitCode === 0 && r.source === 'model' && !r.fallbackUsed);
+const testsLine = (r) => (r && r.tests ? `테스트 ${r.tests.passed}/${r.tests.total} 통과${r.tests.disputed && r.tests.disputed.length ? ` (분쟁 테스트 ${r.tests.disputed.length}개 제외)` : ''}` : (r && r.verification === 'output-only' ? '테스트 없음 · 실행 출력으로 확인' : ''));
 const indent = (s) => String(s ?? '').split('\n').map((l) => '    ' + l).join('\n');
 
 function toMarkdown(prompt, res, st) {
@@ -178,13 +182,14 @@ function toMarkdown(prompt, res, st) {
   const rinfo = st.runner && st.runner.info;
   const runnerTxt = rinfo ? `${st.runnerUrl} · 승인 ${rinfo.approval === 'ask' ? '콘솔 y/N' : rinfo.approval} · 격리 ${rinfo.permissionModel || '없음'}` : `${st.runnerUrl} (응답 없음)`;
   const consensus = [
-    `- **진실 게이트**: ${ok ? 'VERIFIED (내 PC 실행기 실측 exit 0 + 표준 출력 확인)' : `${UNV} · ${stop} · ${stopText(stop)}`}`,
+    `- **진실 게이트**: ${ok ? `VERIFIED (${res.verification === 'tests' ? '테스트 통과 + ' : ''}내 PC 실행기 실측 exit 0${res.verification === 'tests' ? '' : ' + 표준 출력 확인'})` : `${UNV} · ${stop} · ${stopText(stop)}`}`,
+    `- **검증**: ${testsLine(res) || '-'}${res.candidatesTried > 1 ? ` · 후보 ${res.candidatesTried}개 중 ${Number(res.chosenCandidate || 0) + 1}번 선택` : ''}`,
     `- **실행 루프**: 시도 ${res.attempts || 0}회 · 수정 ${Math.max(0, (res.attempts || 1) - 1)}회 · 모델 ${res.source === 'model' ? (st.model || '-') : (res.source || '-')} · 실행기 ${runnerTxt}`,
     `- **원장**: ${res.committed ? 'committed 반영' : 'committed 미반영'}${res.runId ? ` · ${res.runId}` : ''} · 전체 기록은 [실행 콘솔](astra.html)${res.ledgerWarning ? ` · ${res.ledgerWarning}` : ''}`,
   ].join('\n');
   let body = '';
   if (ok) {
-    body += `### 진실 게이트 · VERIFIED\n내 PC 실행기에서 실제로 실행해 exit 0 과 표준 출력을 확인했습니다.\n\n**관측 출력 (stdout · 실행기 실측)**\n\n${indent(res.observedOutput)}\n\n`;
+    body += `### 진실 게이트 · VERIFIED\n${res.verification === 'tests' ? `요구사항으로 먼저 만든 테스트를 내 PC 실행기에서 돌려 ${testsLine(res)}, 프로그램도 exit 0 으로 끝났습니다.` : '내 PC 실행기에서 실제로 실행해 exit 0 과 표준 출력을 확인했습니다.'}\n\n**관측 출력 (stdout · 실행기 실측)**\n\n${indent(res.observedOutput)}\n\n`;
   } else {
     body += `### 진실 게이트 · ${UNV}\n멈춘 이유: \`${stop}\` · ${stopText(stop)}\n\n`;
     const err = String(res.lastError || res.error || '').trim();
@@ -197,6 +202,7 @@ function toMarkdown(prompt, res, st) {
       : `### ${UNV} 생성된 코드 (실행 안 됨)`;
     body += `${title}\n\`\`\`javascript\n${res.code}\n\`\`\`\n`;
   }
+  if (res.testCode) body += `### ${ok ? '' : UNV + ' '}테스트 코드 (test.mjs · 요구사항 기준)\n\`\`\`mjs\n${res.testCode}\n\`\`\`\n`;
   const q = (s) => String(s || '').replace(/"/g, "'").replace(/\n/g, ' ');
   return `## [라우팅 및 합의 요약]
 ${consensus}
@@ -208,6 +214,9 @@ ${body}
 user_goal: "${q(prompt.slice(0, 80))}"
 engine: astra-unified-engine
 status: ${ok ? 'VERIFIED' : 'UNVERIFIED_NEEDS_LOCAL_RUN'}
+verification: ${res.verification || '-'}
+tests: "${res.tests ? `${res.tests.passed}/${res.tests.total}` : '-'}"
+candidates: ${res.candidatesTried || 1}
 stop_reason: ${stop}
 run_id: ${res.runId || '-'}
 attempts: ${res.attempts || 0}
