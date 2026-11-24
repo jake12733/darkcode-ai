@@ -98,7 +98,7 @@
     const o = ORI[orientation] ? orientation : 'landscape';
     const sources = [['pexels', pexelsPhotos], ['unsplash', unsplashPhotos], ['wikimedia', wikimediaPhotos], ['openverse', openversePhotos]].filter(([n]) => n === 'wikimedia' || n === 'openverse' || has(n));
     for (const [name, fn] of sources) {
-      for (const q of variants(query, name === 'wikimedia' || name === 'openverse')) {
+      for (const q of variants(query, name === 'wikimedia' || name === 'openverse').slice(0, name === 'openverse' ? 1 : 3)) {
         let list = [];
         try { list = await memo(`${name}|${o}|${q}`, () => fn(q, o, signal)); } catch (e) { if (e.status === 401 || e.status === 403) break; continue; }
         const pick = list.find((x) => !used.has(x.id));
@@ -169,6 +169,8 @@
     if (/avatar|profile|portrait|doctor-card|team|staff|인물|원장|의료진/i.test(hint)) return 'portrait';
     return 'landscape';
   }
+  // 표식 하나당 최대 대기 (느린 공개 아카이브 때문에 전체가 멈추지 않게)
+  const capped = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(() => res(null), ms))]);
   async function pool(tasks, n) {
     const out = []; let i = 0;
     const worker = async () => { while (i < tasks.length) { const k = i++; out[k] = await tasks[k](); } };
@@ -202,7 +204,7 @@
         let item = null;
         try {
           if (/^ai\s*:/i.test(q)) { const a = await aiPhoto(q.replace(/^ai\s*:/i, ''), { signal, retries: 2 }); item = { url: a.url || a.dataUrl, alt: q, credit: a.credit }; stats.ai++; }
-          else item = await findPhoto(q, { orientation: orientOf(el, 'img'), used, signal });
+          else item = await capped(findPhoto(q, { orientation: orientOf(el, 'img'), used, signal }), 25000);
         } catch (e) { log(`사진 실패 "${q}" · ${e.message}`, 'warn'); }
         if (!item) { stats.failed++; el.setAttribute('src', 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="10"><rect width="16" height="10" fill="#d9dde3"/></svg>')); return; }
         el.setAttribute('src', item.url);
@@ -218,7 +220,7 @@
       tasks.push(async () => {
         const q = el.getAttribute('data-dc-bg');
         let item = null;
-        try { item = await findPhoto(q, { orientation: 'landscape', used, signal }); } catch (e) { log(`배경 실패 "${q}" · ${e.message}`, 'warn'); }
+        try { item = await capped(findPhoto(q, { orientation: 'landscape', used, signal }), 25000); } catch (e) { log(`배경 실패 "${q}" · ${e.message}`, 'warn'); }
         if (!item) { stats.failed++; return; }
         const st = (el.getAttribute('style') || '').replace(/;\s*$/, '');
         el.setAttribute('style', `${st}${st ? ';' : ''}background-image:url("${item.url}");background-size:cover;background-position:center`);
@@ -230,11 +232,11 @@
       tasks.push(async () => {
         const q = el.getAttribute('data-dc-video');
         let v = null;
-        try { v = await findVideo(q, { orientation: 'landscape', used: usedV, signal }); } catch (e) { log(`영상 실패 "${q}" · ${e.message}`, 'warn'); }
+        try { v = await capped(findVideo(q, { orientation: 'landscape', used: usedV, signal }), 20000); } catch (e) { log(`영상 실패 "${q}" · ${e.message}`, 'warn'); }
         ['muted', 'playsinline', 'loop', 'autoplay'].forEach((a) => el.setAttribute(a, ''));
         if (v) { el.setAttribute('src', v.url); if (v.poster) el.setAttribute('poster', v.poster); stats.videos++; note(v); return; }
         let p = null;
-        try { p = await findPhoto(q, { orientation: 'landscape', used, signal }); } catch { /* 아래 처리 */ }
+        try { p = await capped(findPhoto(q, { orientation: 'landscape', used, signal }), 25000); } catch { /* 아래 처리 */ }
         if (p) { el.setAttribute('poster', p.url); stats.photos++; note(p); log(`영상 키 없음 → "${q}" 사진으로 대체 (Pexels 키를 넣으면 실제 영상)`, 'warn'); }
         else stats.failed++;
       });
