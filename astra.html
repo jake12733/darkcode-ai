@@ -192,7 +192,7 @@
     // 엔진 원본: darkcode-core/runner/astra-unified-engine.js (이 사이트 assets 에 같은 파일)
     // 규칙은 전부 엔진이 판단: 단일 타겟 잠금 · 0원 폴백 · 재시도 루프 · 관측 출력 기반 VERIFIED · runs/committed 원장
     // 이 페이지는 입력 전달, 진행 표시, 결과 표시만 한다. VERIFIED 를 여기서 만들지 않는다.
-    import { AstraUnifiedEngine } from './assets/astra-unified-engine.js?v=20261123c';
+    import { AstraUnifiedEngine } from './assets/astra-unified-engine.js?v=20261124e3';
 
     const UNV = '[UNVERIFIED_NEEDS_LOCAL_RUN]';
     const MODEL_TIMEOUT_MS = 180000;
@@ -218,6 +218,7 @@
       APPROVAL_DENIED: '실행기 창에서 거부했거나 60초 안에 승인하지 않음',
       SPAWN_ERROR: '실행기가 프로세스를 띄우지 못함 (Node 설치 확인)',
       NO_NEW_PATCH: '모델이 같은 코드를 다시 냄 → 프롬프트를 더 구체적으로',
+      TESTS_FAILED: '요구사항 테스트를 끝까지 통과하지 못함 → 프롬프트를 더 구체적으로 또는 다른 모델',
       REPEATED_ERROR: '같은 에러가 반복됨 → 프롬프트 수정 또는 다른 모델',
       MODEL_FAILED_ON_RETRY: '재시도 중 모델 호출 실패',
       FALLBACK_ONLY: '모델 호출 실패 → 0원 스텁만 실행됨 (실행기 경로 확인용, 확정 불가)',
@@ -433,14 +434,14 @@
       els.finalCode.value = res.code || '';
       els.finalCode.className = `code ${verified ? 'ok' : 'unv'}`;
       els.codeLabel.className = verified ? 'ok' : 'unv';
-      els.codeLabel.textContent = verified ? `실행된 코드 · VERIFIED · 실행기 실측 exit 0 · hash ${res.codeHash}`
+      els.codeLabel.textContent = verified ? `실행된 코드 · VERIFIED · 실행기 실측 exit 0${res.tests ? ` · 테스트 ${res.tests.passed}/${res.tests.total}` : ''} · hash ${res.codeHash}`
         : !res.code ? `${UNV} 코드 없음`
         : res.fallbackUsed ? `${UNV} 0원 스텁 (모델 코드 아님 · 확정 불가)`
         : res.executed ? `${UNV} 실행됐지만 실패 (exit ${res.exitCode}) · 마지막 시도 코드`
         : `${UNV} 생성만 됨 · 실행 안 됨`;
 
       log('', true);
-      log(verified ? `[GATE] VERIFIED · ${stopText('OK')} · ${res.committed ? 'committed 반영' : 'committed 미반영'}` : `[GATE] ${UNV} · ${stop} · ${stopText(stop)}`);
+      log(verified ? `[GATE] VERIFIED · ${stopText('OK')}${res.tests ? ` · 테스트 ${res.tests.passed}/${res.tests.total} 통과` : ' · 테스트 없음(출력 확인)'} · ${res.committed ? 'committed 반영' : 'committed 미반영'}` : `[GATE] ${UNV} · ${stop} · ${stopText(stop)}${res.tests ? ` · 테스트 ${res.tests.passed}/${res.tests.total}` : ''}`);
       if (verified) { log('--- 관측 출력 (stdout · 실행기 실측) ---', true); log(res.observedOutput || '', true); }
       else if (res.lastError || res.error) { log('--- 마지막 에러 ---', true); log(String(res.lastError || res.error), true); }
       if (res.ledgerWarning) log(`[LEDGER] ${res.ledgerWarning}`);
