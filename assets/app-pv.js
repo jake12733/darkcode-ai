@@ -676,6 +676,15 @@ async function resolveMedia(modelText, run) {
 async function execute(prompt, { noCache = false } = {}) {
   if (state.running) return;
   // STUDIO 명령: /music 대충 쓴 문장 → AI 작곡, /video → 영상 만들기
+  // 홍보영상 요청 → STUDIO 홍보영상 (실사 영상·사진 + 나레이션 + 자막 + MP4 자동 제작) · 기획안·대본만 요청하면 채팅으로 답한다
+  const promoCmd = prompt.match(/^\/(promo|홍보|광고)(?:\s+([\s\S]*))?$/i);
+  const promoAsk = !promoCmd && /(홍보|광고|프로모션|소개)\s*(영상|동영상|비디오)|promo(tion(al)?)?\s*video/i.test(prompt) && /(만들|제작|생성|뽑아|찍어|make|create)/i.test(prompt) && !/(기획|대본|스크립트|콘티|아이디어|시나리오)/.test(prompt);
+  if (promoCmd || promoAsk) {
+    const pq = (promoCmd ? promoCmd[2] || '' : prompt).trim();
+    window.open(`studio.html?tab=promo${pq ? `&q=${encodeURIComponent(pq)}&auto=1` : ''}`, '_blank');
+    toast('STUDIO 홍보영상에서 실사 영상 + 나레이션 + 자막으로 만들기 시작합니다');
+    return;
+  }
   const studioCmd = prompt.match(/^\/(music|음악|노래|song|video|영상|뮤비)(?:\s+([\s\S]*))?$/i);
   if (studioCmd) {
     const isVideo = /^(video|영상|뮤비)$/i.test(studioCmd[1]);
