@@ -142,24 +142,6 @@ async function decodeAudio(bytes) {
   return ac.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 }
 
-/* ---------- 사진 검수 (Gemini 비전) : 공개 아카이브 사진에 다른 업체 간판·전화번호·옛날 사진이 섞이지 않게 ---------- */
-const ARCHIVE_SRC = /Wikimedia|Openverse/;
-async function screenImage(key, bmp, query) {
-  const c = document.createElement('canvas'); const k = 512 / Math.max(bmp.width, bmp.height);
-  c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
-  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  const data = c.toDataURL('image/jpeg', 0.8).split(',')[1];
-  const ask = `이 사진을 "${query}" 장면의 광고 영상 배경으로 써도 되는지 판단해. 안 되는 경우: 다른 업체 이름·로고·간판·전화번호·사람 이름 같은 글자가 눈에 띄게 보임 / 주제와 무관 / 흑백·옛날 사진·저화질 / 군대·사고·시위 같은 부적절한 장면. JSON 으로만: {"ok":true 또는 false,"reason":"짧게"}`;
-  for (const m of ['gemini-3.5-flash-lite', 'gemini-4-hydrogen']) {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data } }, { text: ask }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 160 } }), signal: AbortSignal.timeout(30000) }).catch(() => null);
-    if (!r || !r.ok) continue;
-    const j = await r.json().catch(() => ({}));
-    const txt = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
-    try { const o = JSON.parse(txt.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '')); return { ok: Boolean(o.ok), reason: String(o.reason || '').slice(0, 80) }; } catch { /* 다음 모델 */ }
-  }
-  return { ok: true, reason: '검수 불가 (통과 처리)' };
-}
-
 /* ---------- 소재 ---------- */
 async function fetchBlob(url, ms) { const r = await fetch(url, { mode: 'cors', signal: AbortSignal.timeout(ms) }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); }
 async function loadVisual(scene, W, H, used, usedV, MB, gemKey) {
@@ -177,14 +159,10 @@ async function loadVisual(scene, W, H, used, usedV, MB, gemKey) {
     }
   }
   for (let tries = 0; tries < 4; tries++) {
-    const p = await capped(M.findPhoto(scene.query, { orientation: orient, used }), 25000);
+    const p = await capped(M.findPhoto(scene.query, { orientation: orient, used, screen: Boolean(gemKey), onReject: (x, why) => log(`  사진 제외 (${why}) → 다음 후보`) }), 60000);
     if (!p) break;
     let bmp = null;
     try { bmp = await createImageBitmap(await fetchBlob(p.url, 45000)); } catch (e) { log(`  사진 불러오기 실패 (${e.message})`); continue; }
-    if (gemKey && ARCHIVE_SRC.test(p.credit.source)) {
-      const v = await screenImage(gemKey, bmp, scene.query);
-      if (!v.ok) { log(`  사진 제외 (${v.reason}) → 다음 후보`); continue; }
-    }
     return { type: 'photo', bmp, credit: p.credit };
   }
   try { const a = await M.aiPhoto(scene.query, { width: W, height: H, retries: 2 }); return { type: 'photo', bmp: await createImageBitmap(a.blob), credit: a.credit }; }

@@ -94,15 +94,45 @@
     const list = open ? [koreanize(w3), w3, w2] : [koreanize(base), base, w3];
     return [...new Set(list.filter(Boolean))];
   }
-  async function findPhoto(query, { orientation = 'landscape', used = new Set(), signal } = {}) {
+  // ---------- 사진 검수 (Gemini 비전) : 공개 아카이브 사진에 다른 업체 간판·전화번호·무관한 장면이 섞이지 않게 (응답이 없으면 제외) ----------
+  async function screenImage(src, query, { signal } = {}) {
+    if (!KEYS.gemini) return { ok: true, reason: '키 없음 (검수 생략)' };
+    let bmp = src;
+    try {
+      if (typeof src === 'string') { const r = await fetch(src, { mode: 'cors', signal: sig(30000, signal) }); if (!r.ok) return { ok: false, reason: `불러오기 실패 ${r.status}` }; bmp = await createImageBitmap(await r.blob()); }
+    } catch (e) { return { ok: false, reason: '불러오기 실패' }; }
+    const c = document.createElement('canvas'); const k = 512 / Math.max(bmp.width, bmp.height);
+    c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const data = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+    const ask = `이 사진을 "${query}" 장면의 광고·홈페이지 사진으로 써도 되는지 판단해. 안 되는 경우: 다른 업체 이름·로고·간판·전화번호·사람 이름 같은 글자가 눈에 띄게 보임 / 주제와 무관 / 흑백·옛날 사진·저화질 / 군대·사고·시위 같은 부적절한 장면. JSON 으로만: {"ok":true 또는 false,"reason":"짧게"}`;
+    for (const m of ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.8-flash']) {
+      for (let a = 0; a < 2; a++) {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': KEYS.gemini }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data } }, { text: ask }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 160 } }), signal: sig(30000, signal) }).catch(() => null);
+        if (!r) continue;
+        if (r.status === 429 || r.status === 503) { await new Promise((res) => setTimeout(res, 1500 * (a + 1))); continue; }
+        if (!r.ok) break;
+        const j = await r.json().catch(() => ({}));
+        const txt = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
+        try { const o = JSON.parse(txt.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '')); return { ok: Boolean(o.ok), reason: String(o.reason || '').slice(0, 80) }; } catch { break; }
+      }
+    }
+    return { ok: false, reason: '검수 응답 없음 (안전하게 제외)' };
+  }
+  async function findPhoto(query, { orientation = 'landscape', used = new Set(), signal, screen = false, onReject } = {}) {
     const o = ORI[orientation] ? orientation : 'landscape';
     const sources = [['pexels', pexelsPhotos], ['unsplash', unsplashPhotos], ['wikimedia', wikimediaPhotos], ['openverse', openversePhotos]].filter(([n]) => n === 'wikimedia' || n === 'openverse' || has(n));
     for (const [name, fn] of sources) {
       for (const q of variants(query, name === 'wikimedia' || name === 'openverse').slice(0, name === 'openverse' ? 1 : 3)) {
         let list = [];
         try { list = await memo(`${name}|${o}|${q}`, () => fn(q, o, signal)); } catch (e) { if (e.status === 401 || e.status === 403) break; continue; }
-        const pick = list.find((x) => !used.has(x.id));
-        if (pick) { used.add(pick.id); return pick; }
+        const open = name === 'wikimedia' || name === 'openverse';
+        const check = screen && open && has('gemini');
+        for (const pick of list.filter((x) => !used.has(x.id)).slice(0, check ? 3 : 1)) {
+          used.add(pick.id);
+          if (check) { const v = await screenImage(pick.url, query, { signal }); if (!v.ok) { if (onReject) onReject(pick, v.reason); continue; } }
+          return pick;
+        }
       }
     }
     return null;
@@ -204,7 +234,7 @@
         let item = null;
         try {
           if (/^ai\s*:/i.test(q)) { const a = await aiPhoto(q.replace(/^ai\s*:/i, ''), { signal, retries: 2 }); item = { url: a.url || a.dataUrl, alt: q, credit: a.credit }; stats.ai++; }
-          else item = await capped(findPhoto(q, { orientation: orientOf(el, 'img'), used, signal }), 25000);
+          else item = await capped(findPhoto(q, { orientation: orientOf(el, 'img'), used, signal, screen: true, onReject: (p, why) => log(`사진 제외 "${q}" · ${why}`, 't') }), 40000);
         } catch (e) { log(`사진 실패 "${q}" · ${e.message}`, 'warn'); }
         if (!item) { stats.failed++; el.setAttribute('src', 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="10"><rect width="16" height="10" fill="#d9dde3"/></svg>')); return; }
         el.setAttribute('src', item.url);
@@ -220,7 +250,7 @@
       tasks.push(async () => {
         const q = el.getAttribute('data-dc-bg');
         let item = null;
-        try { item = await capped(findPhoto(q, { orientation: 'landscape', used, signal }), 25000); } catch (e) { log(`배경 실패 "${q}" · ${e.message}`, 'warn'); }
+        try { item = await capped(findPhoto(q, { orientation: 'landscape', used, signal, screen: true, onReject: (p, why) => log(`배경 제외 "${q}" · ${why}`, 't') }), 40000); } catch (e) { log(`배경 실패 "${q}" · ${e.message}`, 'warn'); }
         if (!item) { stats.failed++; return; }
         const st = (el.getAttribute('style') || '').replace(/;\s*$/, '');
         el.setAttribute('style', `${st}${st ? ';' : ''}background-image:url("${item.url}");background-size:cover;background-position:center`);
@@ -236,7 +266,7 @@
         ['muted', 'playsinline', 'loop', 'autoplay'].forEach((a) => el.setAttribute(a, ''));
         if (v) { el.setAttribute('src', v.url); if (v.poster) el.setAttribute('poster', v.poster); stats.videos++; note(v); return; }
         let p = null;
-        try { p = await capped(findPhoto(q, { orientation: 'landscape', used, signal }), 25000); } catch { /* 아래 처리 */ }
+        try { p = await capped(findPhoto(q, { orientation: 'landscape', used, signal, screen: true }), 40000); } catch { /* 아래 처리 */ }
         if (p) { el.setAttribute('poster', p.url); stats.photos++; note(p); log(`영상 키 없음 → "${q}" 사진으로 대체 (Pexels 키를 넣으면 실제 영상)`, 'warn'); }
         else stats.failed++;
       });
@@ -255,5 +285,5 @@
     return { html: `${hadDoctype ? '<!doctype html>\n' : ''}${doc.documentElement.outerHTML}`, stats, credits };
   }
 
-  window.DCMedia = { version: '1.0', setKeys, has, status, koreanize, photorealPrompt, findPhoto, findVideo, aiPhoto, resolveHtml, creditsHtml };
+  window.DCMedia = { version: '1.1', setKeys, has, status, koreanize, photorealPrompt, findPhoto, findVideo, aiPhoto, screenImage, resolveHtml, creditsHtml };
 })();
